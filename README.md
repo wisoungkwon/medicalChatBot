@@ -308,8 +308,7 @@ MySQL/MariaDB 가 없어도 돌아갑니다. CSRF·IDOR·입력검증·QR 오픈
 | GET | `/patient/me` | ✅ | 본인 프로필 + 진단 이력 |
 | GET | `/patient/me/history` | ✅ | 본인 진단 이력 |
 | GET | `/patient/{id}` | ✅ | 본인만 조회 가능 (레거시) |
-| POST | `/api/diagnosis-history` | ✅ | 진단 결과 저장 (본인 것만). 현재 브라우저는 쓰지 않습니다 — 로그인 상태에서는 `/api/chat` 이 저장까지 처리합니다 |
-| POST | `/api/chat` | ✅ | Flask 중계 (로그인 시 사용) |
+| POST | `/api/chat` | ✅ | Flask 중계 (로그인 시 사용). 진단 결과 저장까지 이 경로가 처리합니다 |
 | GET | `/qrcode?url=` | – | QR 이미지 (base-url 하위만 허용) |
 
 ---

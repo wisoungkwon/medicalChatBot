@@ -77,7 +77,9 @@ class SecurityAndValidationTests {
 		mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"message\":\"두통\"}"))
 				.andExpect(status().isForbidden());
-		mvc.perform(post("/api/diagnosis-history").contentType(MediaType.APPLICATION_JSON)
+		// /api/diagnosis-history 는 제거됐다(ChatController 가 서버에서 저장한다).
+		// 대신 남은 POST 인 회원가입으로 검사한다.
+		mvc.perform(post("/patient/register").contentType(MediaType.APPLICATION_JSON)
 				.content("{}"))
 				.andExpect(status().isForbidden());
 	}
@@ -182,18 +184,11 @@ class SecurityAndValidationTests {
 				.andExpect(status().isUnauthorized());
 	}
 
-	@Test
-	@DisplayName("남의 아이디로는 진단 이력을 저장할 수 없다")
-	void cannotSaveHistoryForAnotherPatient() throws Exception {
-		register("frank001");
-		register("grace001");
-		MockHttpSession frank = loginSession("frank001");
-
-		mvc.perform(post("/api/diagnosis-history").with(csrf()).session(frank)
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"patientId\":\"grace001\",\"symptoms\":\"두통\"}"))
-				.andExpect(status().isForbidden());
-	}
+	// "남의 아이디로는 진단 이력을 저장할 수 없다" 테스트는 제거했다.
+	// 그 검사 대상이던 POST /api/diagnosis-history 자체를 없앴기 때문이다.
+	// 이제 진단 이력은 ChatController 가 세션에서 얻은 환자로만 저장하므로,
+	// 클라이언트가 patientId 를 지정할 통로가 아예 존재하지 않는다
+	// (403 으로 막는 것보다 강한 보장이다).
 
 	// ===== QR =====
 

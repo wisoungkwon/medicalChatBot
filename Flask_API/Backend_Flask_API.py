@@ -9,6 +9,7 @@ medical_server.py
 # 0) 표준/서드파티 모듈 임포트
 # ------------------------------------------------------------
 import os, json, re
+import logging
 import sys
 from pathlib import Path
 from typing import List, Tuple
@@ -21,6 +22,32 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+# ------------------------------------------------------------
+# 0-1) 로깅 설정
+# ------------------------------------------------------------
+# 예전에는 전부 print() 였다. 두 가지가 문제였다.
+#
+#   1) 끌 수가 없다. 이 서버는 요청마다 환자의 나이·성별·기저질환·증상과
+#      생성된 진단 결과를 콘솔에 찍고 있었다. 의료정보가 통제 없이 로그에
+#      쌓이는 셈이라, 운영에서 켜 둘 수 없는 내용이다.
+#   2) 수준 구분이 없다. 오류와 디버그 출력이 같은 스트림에 섞인다.
+#
+# 그래서 규칙을 이렇게 둔다:
+#   INFO  - 무슨 일이 일어났는지만 (건수, 유사도, 소요 시간 등 메타데이터)
+#   DEBUG - 환자 정보·증상 원문·생성된 진단처럼 내용 자체가 담기는 것
+#
+# 기본이 INFO 이므로 그냥 띄우면 개인정보는 로그에 남지 않는다.
+# 문제를 추적해야 할 때만 LOG_LEVEL=DEBUG 로 잠깐 올린다.
+#   예) set LOG_LEVEL=DEBUG   (Windows)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)-7s %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("medbot")
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # CORS 임포트
 
@@ -178,9 +205,9 @@ def chat_with_llm(messages, **gen_opts) -> str:
             f"LLM_REASONING_EFFORT(현재 '{LLM_REASONING_EFFORT}')를 none 으로 두세요."
         )
     if choice.finish_reason == "length":
-        print(
-            f"[경고] 답변이 max_tokens({kwargs['max_tokens']})에서 잘렸습니다. "
-            "항목이 일부 비어 있을 수 있습니다."
+        log.warning(
+            "답변이 max_tokens(%s)에서 잘렸다. 항목이 일부 비어 있을 수 있다.",
+            kwargs["max_tokens"],
         )
     return content
 
@@ -315,7 +342,7 @@ def _needs_rebuild(index_path: str, source_folder: str) -> bool:
 
 def build_or_load_unified_disease_db():
     if _needs_rebuild(UNIFIED_DB_PATH, JSON_FOLDER):
-        print("[Rebuild] 통합 질병 인덱스 (검색용/LLM용 분리)를 새로 생성합니다.")
+        log.info("[Rebuild] 통합 질병 인덱스 (검색용/LLM용 분리)를 새로 생성한다.")
         texts_for_embedding, metas = [], []
         files = sorted([f for f in os.listdir(JSON_FOLDER) if f.endswith(".json")])
 
@@ -362,7 +389,7 @@ def build_or_load_unified_disease_db():
         db.save_local(UNIFIED_DB_PATH)
         return db
     else:
-        print("[Load] 기존 통합 질병 인덱스를 불러옵니다.")
+        log.info("[Load] 기존 통합 질병 인덱스를 불러온다.")
         return faiss_load_local(UNIFIED_DB_PATH, embedding_model)
 
 
@@ -412,10 +439,10 @@ app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_CONTENT_LENGTH", str(1024 
 _origins_raw = os.getenv("ALLOWED_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080")
 ALLOWED_ORIGINS = [o.strip() for o in _origins_raw.split(",") if o.strip()]
 if ALLOWED_ORIGINS == ["*"]:
-    print("[WARN] ALLOWED_ORIGINS=* : 모든 출처에서 호출할 수 있습니다. 운영에서는 쓰지 마세요.")
+    log.warning("ALLOWED_ORIGINS=* : 모든 출처에서 호출할 수 있다. 운영에서는 쓰지 말 것.")
     CORS(app, resources={r"/*": {"origins": "*"}})
 else:
-    print(f"[Info] CORS 허용 출처: {ALLOWED_ORIGINS}")
+    log.info("CORS 허용 출처: %s", ALLOWED_ORIGINS)
     CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 
 
@@ -429,13 +456,11 @@ def health():
 
 try:
     disease_db = build_or_load_unified_disease_db()
-    print("✅ 통합 인덱스 준비 완료")
-except Exception as e:
-    # print 자체가 실패해도 기동은 계속되어야 하므로 traceback 으로 남긴다.
-    import traceback
-
-    print(f"[ERROR] 통합 인덱스 로드/빌드 실패: {e}")
-    traceback.print_exc()
+    log.info("통합 인덱스 준비 완료")
+except Exception:
+    # 인덱스가 없어도 기동은 계속한다(/health 가 degraded 로 알린다).
+    # log.exception 이 트레이스백까지 남기므로 traceback 을 따로 부르지 않는다.
+    log.exception("통합 인덱스 로드/빌드 실패")
     disease_db = None
 
 
@@ -450,8 +475,8 @@ def _general_answer(user_text: str):
     ]
     try:
         return jsonify({"answer": chat_with_llm(general_messages)})
-    except Exception as e:
-        print(f"[ERROR] 일반 답변 생성 실패: {e}")
+    except Exception:
+        log.exception("일반 답변 생성 실패")
         return jsonify({"error": "AI 응답 생성에 실패했습니다."}), 502
 
 
@@ -516,17 +541,25 @@ def ask_symptoms():
     # LLM 에게는 환자 정보를 앞에 붙여 전달한다.
     combined_input = f"{patient_prefix}{search_query}"
 
-    # ⭐ 추가: 디버그를 위해 입력받은 증상과 환자 정보 출력
-    print("\n" + "=" * 50)
-    print("⭐ 새 요청 처리 시작")
-    print(f"  환자 정보: 나이={age}, 성별={gender}, 기저질환='{conditions}'")
-    print(
-        f"  입력된 증상: '{user_input}'"
-        + (f" + 추가 증상: '{additional_symptoms}'" if additional_symptoms else "")
+    # 요청 로그.
+    # INFO 에는 길이만 남긴다 - 요청이 들어왔다는 사실과 규모는 알 수 있으면서
+    # 증상 내용은 로그에 남지 않는다. 내용은 DEBUG 로 내린다.
+    # (% 포맷을 쓰는 이유: DEBUG 가 꺼져 있으면 문자열 자체를 만들지 않는다.
+    #  f-string 으로 쓰면 레벨과 무관하게 개인정보가 메모리에 조립된다.)
+    log.info(
+        "새 요청 (증상 %d자, 추가증상 %d자, 환자정보 %s)",
+        len(user_input),
+        len(additional_symptoms),
+        "있음" if patient_prefix else "없음",
     )
-    print(f"  최종 검색 쿼리: '{search_query}'")
-    print(f"  LLM 입력: '{combined_input}'")
-    print("-" * 50)
+    log.debug("  환자 정보: 나이=%s, 성별=%s, 기저질환='%s'", age, gender, conditions)
+    log.debug(
+        "  입력된 증상: '%s'%s",
+        user_input,
+        f" + 추가 증상: '{additional_symptoms}'" if additional_symptoms else "",
+    )
+    log.debug("  최종 검색 쿼리: '%s'", search_query)
+    log.debug("  LLM 입력: '%s'", combined_input)
 
     # 1) 검색 수행 (combined_input 사용)
     docs_with_scores = search_unified_db_with_scores(
@@ -535,7 +568,7 @@ def ask_symptoms():
 
     # 2) 검색 실패 시 일반 응답 라우팅
     if not docs_with_scores:
-        print("[Info] 관련 질병 정보를 찾을 수 없습니다. 일반적인 답변을 시도합니다.")
+        log.info("관련 질병 정보를 찾을 수 없다. 일반 답변으로 넘긴다.")
         return _general_answer(combined_input)
 
     # 3) 거리 -> 간이 유사도 변환
@@ -548,7 +581,7 @@ def ask_symptoms():
 
     # (A) 비의료/잡담 라우팅
     if top1_score < LOW_CONF_THRESHOLD:
-        print(f"[판단] 비의료 질문 (유사도: {top1_score:.2f} < {LOW_CONF_THRESHOLD})")
+        log.info("[판단] 비의료 질문 (유사도 %.2f < %s)", top1_score, LOW_CONF_THRESHOLD)
         return _general_answer(combined_input)
 
     # (B) 확신도 판단
@@ -561,7 +594,7 @@ def ask_symptoms():
     )
 
     if not is_confident and not additional_symptoms:
-        print(f"[판단] 확신도 낮음 (유사도: {top1_score:.2f}). 추가 증상 요청.")
+        log.info("[판단] 확신도 낮음 (유사도 %.2f). 추가 증상 요청.", top1_score)
         return jsonify(
             {
                 "status": "needs_more_info",
@@ -570,7 +603,7 @@ def ask_symptoms():
         )
 
     # (C) 확신도가 높거나, 추가 증상이 이미 있다면 최종 답변 생성
-    print(f"[판단] 확신도 높음 또는 추가 정보로 재검색. (유사도: {top1_score:.2f})")
+    log.info("[판단] 확신도 높음 또는 추가 정보로 재검색 (유사도 %.2f)", top1_score)
     final_docs = [doc for doc, score in scored_docs[:MAX_DISEASES]]
 
     # 5) LLM 생성
@@ -590,8 +623,8 @@ def ask_symptoms():
         ]
         try:
             answer = chat_with_llm(messages)
-        except Exception as e:
-            print(f"[ERROR] 최종 답변 생성 실패: {e}")
+        except Exception:
+            log.exception("최종 답변 생성 실패")
             return jsonify({"error": "AI 응답 생성에 실패했습니다."}), 502
 
         structured_answer = extract_diagnosis_parts(answer)
@@ -602,10 +635,11 @@ def ask_symptoms():
         # 구조화 결과 대신 원문을 문자열로 돌려준다(= 저장 대상이 아님).
         # 이력 화면의 중심 항목이 '예측 진단'이므로 이것이 비면 분리 실패로 본다.
         if not structured_answer["predictedDiagnosis"].strip():
-            print("[경고] 항목 분리 실패 - 원문을 그대로 반환한다(저장하지 않음).")
+            log.warning("항목 분리 실패 - 원문을 그대로 반환한다(저장하지 않음).")
             return jsonify({"answer": answer})
 
-        print(f"[디버그] 분리된 답변: {structured_answer}")
+        # 생성된 진단 결과는 그 자체가 의료정보다. DEBUG 로만 남긴다.
+        log.debug("분리된 답변: %s", structured_answer)
         return jsonify({"answer": structured_answer})
 
     return jsonify({"error": "알 수 없는 오류가 발생했습니다."}), 500

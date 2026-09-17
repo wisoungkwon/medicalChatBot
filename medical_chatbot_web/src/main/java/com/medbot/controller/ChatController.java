@@ -5,13 +5,18 @@ import com.medbot.domain.Patient;
 import com.medbot.repository.DiagnosisHistoryRepository;
 import com.medbot.repository.PatientRepository;
 import jakarta.servlet.http.HttpSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -36,6 +41,29 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/chat")
 public class ChatController {
+
+	private static final Logger log = LoggerFactory.getLogger(ChatController.class);
+
+	/**
+	 * 사용자에게 보여줄 오류 문구.
+	 *
+	 * <p><b>이 문자열들은 개발자용 로그가 아니라 환자가 읽는 안내문이다.</b>
+	 * chatbot.js 는 응답의 {@code error} 값을 그대로 챗 말풍선에 출력한다
+	 * (chatbot.js 의 {@code if (data.error) addMessage(data.error, "bot")}).
+	 * 따라서 두 가지를 지킨다:
+	 * <ul>
+	 *   <li>예외 메시지({@code e.getMessage()})나 Flask 응답 본문을 섞지 않는다.
+	 *       내부 주소와 파이썬 트레이스백이 화면에 그대로 노출되고, 환자에게는
+	 *       아무 도움도 되지 않는다. 원인은 서버 로그에만 남긴다.</li>
+	 *   <li>다시 시도하면 될 상황인지를 문구로 구분해 알려준다.</li>
+	 * </ul>
+	 */
+	private static final String MSG_LOGIN_REQUIRED = "로그인이 필요합니다.";
+	private static final String MSG_EMPTY_SYMPTOM = "증상을 입력해주세요.";
+	private static final String MSG_PATIENT_NOT_FOUND = "환자 정보를 찾을 수 없습니다. 다시 로그인해주세요.";
+	private static final String MSG_AI_TIMEOUT = "답변을 만드는 데 시간이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.";
+	private static final String MSG_AI_UNREACHABLE = "AI 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.";
+	private static final String MSG_AI_FAILED = "AI 서버가 응답하지 못했습니다. 잠시 후 다시 시도해주세요.";
 
 	private final PatientRepository patientRepository;
 	private final DiagnosisHistoryRepository historyRepository;
@@ -62,18 +90,21 @@ public class ChatController {
 	public ResponseEntity<?> chat(@RequestBody ChatRequest request, HttpSession session) {
 		String loginId = (String) session.getAttribute(PatientController.SESSION_LOGIN_ID);
 		if (loginId == null) {
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error("로그인이 필요합니다."));
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error(MSG_LOGIN_REQUIRED));
 		}
 
 		String symptoms = request.getMessage() == null ? "" : request.getMessage().trim();
 		if (symptoms.isEmpty()) {
-			return ResponseEntity.badRequest().body(error("증상을 입력해주세요."));
+			return ResponseEntity.badRequest().body(error(MSG_EMPTY_SYMPTOM));
 		}
 
 		// 1) 환자 정보는 세션의 로그인 아이디로 DB에서 조회한다(클라이언트 입력 불신).
 		Optional<Patient> opt = patientRepository.findById(loginId);
 		if (opt.isEmpty()) {
-			return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("환자 정보를 찾을 수 없습니다."));
+			// 세션은 살아 있는데 환자 행이 없다. 정상 경로로는 나올 수 없는 상태라
+			// (계정 삭제 후 세션이 남았거나 DB 를 갈아끼운 경우) 로그로 남긴다.
+			log.warn("세션의 로그인 아이디로 환자를 찾지 못했다. loginId={}", loginId);
+			return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error(MSG_PATIENT_NOT_FOUND));
 		}
 		Patient patient = opt.get();
 
@@ -93,22 +124,40 @@ public class ChatController {
 		headers.setContentType(MediaType.APPLICATION_JSON);
 
 		// 3) Flask 호출
+		//    실패를 세 갈래로 나눈다. 사용자에게 줄 안내와 로그에 남길 내용이 서로 다르다.
+		String url = trimTrailingSlash(pythonApiUrl) + "/ask_symptoms";
 		Map<String, Object> aiResponse;
 		try {
 			ResponseEntity<Map<String, Object>> pyRes = restTemplate.exchange(
-					trimTrailingSlash(pythonApiUrl) + "/ask_symptoms",
+					url,
 					HttpMethod.POST,
 					new HttpEntity<>(body, headers),
 					new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {
 					});
 			aiResponse = pyRes.getBody();
+		} catch (HttpStatusCodeException e) {
+			// Flask 가 응답은 했지만 4xx/5xx 다. 본문에 파이썬 트레이스백이 실려 오는
+			// 경우가 있어 로그에만 남기고 화면으로는 내보내지 않는다.
+			log.error("Flask 오류 응답. url={} status={} body={}",
+					url, e.getStatusCode(), e.getResponseBodyAsString());
+			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(MSG_AI_FAILED));
+		} catch (ResourceAccessException e) {
+			// 연결 자체가 안 됐거나(서버 미기동) 읽기 타임아웃이다.
+			// 타임아웃은 "조금 기다렸다 다시 하면 될 수도 있다" 는 뜻이라 문구를 구분한다.
+			boolean timedOut = e.getCause() instanceof SocketTimeoutException;
+			log.error("Flask 호출 실패. url={} timedOut={}", url, timedOut, e);
+			return timedOut
+					? ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(error(MSG_AI_TIMEOUT))
+					: ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(MSG_AI_UNREACHABLE));
 		} catch (RestClientException e) {
-			return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-					.body(error("AI 서버와 통신할 수 없습니다: " + e.getMessage()));
+			// 나머지 — 주로 JSON 이 아닌 응답이 와서 역직렬화에 실패한 경우.
+			log.error("Flask 응답 처리 실패. url={}", url, e);
+			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(MSG_AI_FAILED));
 		}
 
 		if (aiResponse == null) {
-			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error("AI 응답이 없습니다."));
+			log.error("Flask 가 2xx 를 주었지만 본문이 비어 있다. url={}", url);
+			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(MSG_AI_FAILED));
 		}
 
 		// 4) 구조화된 진단 결과일 때만 DB에 저장한다.

@@ -14,7 +14,7 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
  *
  * <p>목적은 <b>CSRF 보호</b>다. 이 앱은 세션 쿠키로 로그인 상태를 유지하는데,
  * CSRF 보호가 없으면 외부 사이트가 사용자의 브라우저를 이용해
- * {@code /patient/logout}, {@code /api/diagnosis-history} 같은 POST 를
+ * {@code /patient/logout}, {@code /api/chat} 같은 POST 를
  * 위조 호출할 수 있다.
  *
  * <p><b>인증/인가는 기존 방식을 그대로 유지한다.</b> 각 컨트롤러가
