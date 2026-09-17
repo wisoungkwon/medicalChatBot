@@ -18,7 +18,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.SocketTimeoutException;
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -185,10 +184,9 @@ public class ChatController {
 
 	// ===== 내부 헬퍼 =====
 
+	/** 응답 본문 형식은 ApiBody 로 모았다(PatientController 와 공유). */
 	private static Map<String, String> error(String message) {
-		Map<String, String> m = new HashMap<>();
-		m.put("error", message);
-		return m;
+		return ApiBody.error(message);
 	}
 
 	private static String str(Object o) {

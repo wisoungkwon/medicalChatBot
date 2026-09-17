@@ -64,9 +64,9 @@ public class PatientController {
 
 	/** 회원가입: 엔티티 + write-only password 사용 */
 	@PostMapping("/patient/register")
-	public ResponseEntity<String> register(@RequestBody Patient req) {
+	public ResponseEntity<?> register(@RequestBody Patient req) {
 		if (req.getId() == null || req.getAge() == null || req.getGender() == null || req.getPassword() == null) {
-			return ResponseEntity.badRequest().body("필수 항목 누락");
+			return ResponseEntity.badRequest().body(ApiBody.error("필수 항목 누락"));
 		}
 
 		// 검증은 저장 전에 모두 끝낸다. 예전에는 검증이 전혀 없어서
@@ -75,28 +75,28 @@ public class PatientController {
 		// 이 가능했다.
 		String id = req.getId().trim();
 		if (id.length() < ID_MIN || id.length() > ID_MAX || !ID_PATTERN.matcher(id).matches()) {
-			return ResponseEntity.badRequest().body("아이디는 공백 없이 " + ID_MIN + "~" + ID_MAX + "자여야 합니다.");
+			return ResponseEntity.badRequest().body(ApiBody.error("아이디는 공백 없이 " + ID_MIN + "~" + ID_MAX + "자여야 합니다."));
 		}
 		if (!PASSWORD_PATTERN.matcher(req.getPassword()).matches()) {
-			return ResponseEntity.badRequest().body("비밀번호는 영문/숫자/특수문자를 모두 포함한 8~20자여야 합니다.");
+			return ResponseEntity.badRequest().body(ApiBody.error("비밀번호는 영문/숫자/특수문자를 모두 포함한 8~20자여야 합니다."));
 		}
 		int age = req.getAge();
 		if (age < AGE_MIN || age > AGE_MAX) {
-			return ResponseEntity.badRequest().body("나이는 " + AGE_MIN + "~" + AGE_MAX + " 사이여야 합니다.");
+			return ResponseEntity.badRequest().body(ApiBody.error("나이는 " + AGE_MIN + "~" + AGE_MAX + " 사이여야 합니다."));
 		}
 		String gender = req.getGender().trim().toLowerCase(Locale.ROOT);
 		if (!gender.equals("m") && !gender.equals("f")) {
-			return ResponseEntity.badRequest().body("성별은 m 또는 f 여야 합니다.");
+			return ResponseEntity.badRequest().body(ApiBody.error("성별은 m 또는 f 여야 합니다."));
 		}
 
 		String conditions = (req.getConditions() == null || req.getConditions().trim().isEmpty()) ? "없음"
 				: req.getConditions().trim();
 		if (conditions.length() > CONDITIONS_MAX) {
-			return ResponseEntity.badRequest().body("기저질환은 " + CONDITIONS_MAX + "자를 넘을 수 없습니다.");
+			return ResponseEntity.badRequest().body(ApiBody.error("기저질환은 " + CONDITIONS_MAX + "자를 넘을 수 없습니다."));
 		}
 
 		if (patientRepo.existsById(id)) {
-			return ResponseEntity.status(HttpStatus.CONFLICT).body("이미 존재하는 아이디입니다.");
+			return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiBody.error("이미 존재하는 아이디입니다."));
 		}
 
 		Patient p = new Patient();
@@ -107,16 +107,16 @@ public class PatientController {
 		p.setPasswordHash(encoder.encode(req.getPassword())); // 응답에 노출 안 됨
 
 		patientRepo.save(p);
-		return ResponseEntity.ok("회원가입이 완료되었습니다.");
+		return ResponseEntity.ok(ApiBody.message("회원가입이 완료되었습니다."));
 	}
 
 	/** 로그인: 간단 Map으로 입력 */
 	@PostMapping("/patient/login")
-	public ResponseEntity<String> login(@RequestBody Map<String, String> body, HttpServletRequest httpRequest) {
+	public ResponseEntity<?> login(@RequestBody Map<String, String> body, HttpServletRequest httpRequest) {
 		String rawId = body.get("id");
 		String password = body.get("password");
 		if (rawId == null || password == null)
-			return ResponseEntity.badRequest().body("아이디/비밀번호를 입력하세요.");
+			return ResponseEntity.badRequest().body(ApiBody.error("아이디/비밀번호를 입력하세요."));
 
 		// 가입 때 trim 한 값으로 저장하므로 조회할 때도 똑같이 맞춘다.
 		String id = rawId.trim();
@@ -126,7 +126,7 @@ public class PatientController {
 			// 존재하지 않는 아이디라도 해시 비교와 비슷한 시간을 쓰게 한다.
 			// 곧바로 반환하면 응답 시간 차이로 가입된 아이디를 알아낼 수 있다.
 			encoder.matches(password, dummyHash);
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("아이디 또는 비밀번호가 올바르지 않습니다.");
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiBody.error("아이디 또는 비밀번호가 올바르지 않습니다."));
 		}
 
 		Patient p = opt.get();
@@ -137,15 +137,15 @@ public class PatientController {
 				old.invalidate();
 			}
 			httpRequest.getSession(true).setAttribute(SESSION_LOGIN_ID, p.getId());
-			return ResponseEntity.ok("로그인 성공");
+			return ResponseEntity.ok(ApiBody.message("로그인 성공"));
 		}
-		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("아이디 또는 비밀번호가 올바르지 않습니다.");
+		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiBody.error("아이디 또는 비밀번호가 올바르지 않습니다."));
 	}
 
 	@PostMapping("/patient/logout")
-	public ResponseEntity<String> logout(HttpSession session) {
+	public ResponseEntity<?> logout(HttpSession session) {
 		session.invalidate();
-		return ResponseEntity.ok("로그아웃 되었습니다.");
+		return ResponseEntity.ok(ApiBody.message("로그아웃 되었습니다."));
 	}
 
 	/**
@@ -158,7 +158,7 @@ public class PatientController {
 	public ResponseEntity<?> getMe(HttpSession session) {
 		String loginId = loginId(session);
 		if (loginId == null)
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiBody.error("로그인이 필요합니다."));
 
 		return patientRepo.findById(loginId).<ResponseEntity<?>>map(this::toProfilePayload)
 				.orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
@@ -169,7 +169,7 @@ public class PatientController {
 	public ResponseEntity<?> getMyHistory(HttpSession session) {
 		String loginId = loginId(session);
 		if (loginId == null)
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiBody.error("로그인이 필요합니다."));
 
 		return ResponseEntity.ok(historyRepo.findByPatientIdOrderByChatDateDesc(loginId));
 	}
@@ -185,9 +185,9 @@ public class PatientController {
 	public ResponseEntity<?> getPatient(@PathVariable String id, HttpSession session) {
 		String loginId = loginId(session);
 		if (loginId == null)
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiBody.error("로그인이 필요합니다."));
 		if (!loginId.equals(id))
-			return ResponseEntity.status(HttpStatus.FORBIDDEN).body("본인 정보만 조회할 수 있습니다.");
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiBody.error("본인 정보만 조회할 수 있습니다."));
 
 		return patientRepo.findById(id).<ResponseEntity<?>>map(this::toProfilePayload)
 				.orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
@@ -198,9 +198,9 @@ public class PatientController {
 	public ResponseEntity<?> getPatientHistory(@PathVariable String id, HttpSession session) {
 		String loginId = loginId(session);
 		if (loginId == null)
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("로그인이 필요합니다.");
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiBody.error("로그인이 필요합니다."));
 		if (!loginId.equals(id))
-			return ResponseEntity.status(HttpStatus.FORBIDDEN).body("본인 정보만 조회할 수 있습니다.");
+			return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiBody.error("본인 정보만 조회할 수 있습니다."));
 
 		return ResponseEntity.ok(historyRepo.findByPatientIdOrderByChatDateDesc(id));
 	}

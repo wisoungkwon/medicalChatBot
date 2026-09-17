@@ -65,6 +65,53 @@ class SecurityAndValidationTests {
 		return (MockHttpSession) res.getRequest().getSession(false);
 	}
 
+	// ===== 응답 형식 =====
+
+	/**
+	 * 모든 응답은 JSON 객체다 - 실패는 {@code error}, 성공 안내는 {@code message}.
+	 *
+	 * <p>예전에는 /patient/* 만 평문 문자열을 돌려줘서 프론트엔드가 엔드포인트마다
+	 * {@code res.text()} 와 {@code res.json()} 을 갈라 써야 했다. 형식이 다시
+	 * 갈라지면 chatbot.js 의 readApiMessage() 가 조용히 fallback 문구만 띄우게
+	 * 되므로(예외가 아니라 화면에 엉뚱한 안내가 뜬다) 여기서 고정한다.
+	 */
+	@Test
+	@DisplayName("성공·실패 응답이 모두 JSON 객체다 (message / error)")
+	void apiResponsesAreJsonObjects() throws Exception {
+		// 실패: 검증 오류
+		mvc.perform(post("/patient/register").with(csrf())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(signupJson("bad", 30, "m", VALID_PW)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error").exists());
+
+		// 성공: 회원가입
+		mvc.perform(post("/patient/register").with(csrf())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(signupJson("hazel001", 30, "m", VALID_PW)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.message").exists());
+
+		// 실패: 잘못된 비밀번호. 본문에 어떤 계정이 있는지 흘리지 않는지도 함께 본다.
+		mvc.perform(post("/patient/login").with(csrf())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"id\":\"hazel001\",\"password\":\"Wrong123!\"}"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error").exists());
+
+		// 실패: 비로그인 상태로 보호된 경로
+		mvc.perform(get("/patient/me"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.error").exists());
+
+		// 성공: 로그인
+		mvc.perform(post("/patient/login").with(csrf())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(String.format("{\"id\":\"hazel001\",\"password\":\"%s\"}", VALID_PW)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.message").exists());
+	}
+
 	// ===== CSRF =====
 
 	@Test

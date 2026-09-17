@@ -92,6 +92,27 @@ document.addEventListener("DOMContentLoaded", function() {
 		});
 	}
 
+	/**
+	 * 응답 본문에서 사용자에게 보여줄 한 줄을 꺼낸다.
+	 *
+	 * 서버는 모든 응답을 JSON 객체로 준다(ApiBody).
+	 *   실패 -> { "error": "..." }
+	 *   성공 -> { "message": "..." }
+	 * 예전에는 /patient/* 만 평문을 돌려줘서 호출부마다 res.text() 와
+	 * res.json() 이 섞여 있었다.
+	 *
+	 * 서버가 죽어 HTML 오류 페이지를 돌려주는 경우처럼 JSON 이 아닐 수도
+	 * 있으므로, 파싱 실패는 예외로 터뜨리지 않고 fallback 을 쓴다.
+	 */
+	async function readApiMessage(res, fallback) {
+		try {
+			const data = await res.json();
+			return data?.error || data?.message || fallback;
+		} catch {
+			return fallback;
+		}
+	}
+
 	/* =========================
 	   유틸
 	========================== */
@@ -427,9 +448,9 @@ document.addEventListener("DOMContentLoaded", function() {
 		try {
 			const res = await postJson("/patient/register",
 				{ id, age, gender, conditions, password: pwd });
-			const txt = await res.text();
-			if (!res.ok) throw new Error(txt || "회원가입 실패");
-			alert(txt || "회원가입이 완료되었습니다!");
+			const txt = await readApiMessage(res, res.ok ? "회원가입이 완료되었습니다!" : "회원가입 실패");
+			if (!res.ok) throw new Error(txt);
+			alert(txt);
 			resetSignupForm();
 			signupModal.style.display = "none";
 		} catch (err) {
@@ -446,12 +467,11 @@ document.addEventListener("DOMContentLoaded", function() {
 
 	async function doLogin(id, password) {
 		const res = await postJson("/patient/login", { id, password });
-		const text = await res.text();
 
 		// 성공 여부를 먼저 확인한다. 실패면 여기서 예외로 빠진다.
 		// (성공 alert 은 두지 않는다 - 모달이 닫히고 메뉴가 로그아웃으로
 		//  바뀌는 것으로 이미 피드백이 되므로 팝업은 불필요하다.)
-		if (!res.ok) throw new Error(text || "로그인 실패");
+		if (!res.ok) throw new Error(await readApiMessage(res, "로그인 실패"));
 
 		resetLoginForm?.();
 		if (loginModal) loginModal.style.display = "none";
@@ -475,8 +495,7 @@ document.addEventListener("DOMContentLoaded", function() {
 	logoutBtn?.addEventListener("click", async () => {
 		try {
 			const res = await postJson("/patient/logout");
-			const text = await res.text();
-			if (!res.ok) throw new Error(text || "로그아웃 실패");
+			if (!res.ok) throw new Error(await readApiMessage(res, "로그아웃 실패"));
 			setLoggedInUI(false);
 
 			currentPatientId = null;
