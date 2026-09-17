@@ -1,0 +1,561 @@
+:root {
+	--bg: #f4f7f9;
+	--header: #3f51b5;
+	--bot-bg: #e0e0e0;
+	--user-bg: #3f51b5;
+	--user-txt: #fff;
+	--font: #111;
+	--card-border: #ddd;
+}
+
+body {
+	font-family: Arial, sans-serif;
+	background-color: var(--bg);
+	color: var(--font);
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	overflow-x: hidden;
+}
+
+/* 헤더 */
+header {
+	background-color: var(--header);
+	color: #fff;
+	padding: 15px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.hamburger-btn {
+	background: none;
+	border: none;
+	color: #fff;
+	font-size: 24px;
+	cursor: pointer;
+}
+
+.dark-btn {
+	background: none;
+	color: #fff;
+	font-size: 20px;
+	border: none;
+	cursor: pointer;
+	width: 50px;
+	height: 50px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* 헤더 우측 */
+.header-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.font-btn-group {
+	display: flex;
+	gap: 4px;
+}
+
+.font-btn-group button {
+	background-color: var(--header);
+	color: #fff;
+	border: none;
+	border-radius: 6px;
+	width: 50px;
+	height: 50px;
+	font-size: 14px;
+	cursor: pointer;
+	border: 1.5px solid #fff3;
+	transition: background .2s;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+}
+
+.font-btn-group button:hover {
+	background-color: #303f9f;
+}
+
+html, body {
+	overflow-x: hidden;
+}
+
+/* 사이드 메뉴 */
+.side-menu {
+	position: fixed;
+	top: 0;
+	left: -260px;
+	width: 250px;
+	height: 100%;
+	background-color: var(--bg);
+	padding: 20px;
+	transition: left .3s ease;
+	z-index: 1000;
+}
+
+.side-menu.open {
+	left: 0;
+}
+
+.side-menu .menu-header {
+	font-weight: bold;
+	font-size: 18px;
+	margin-bottom: 20px;
+}
+
+.side-menu ul {
+	list-style: none;
+	padding: 0;
+}
+
+.side-menu ul li {
+	margin-bottom: 15px;
+}
+
+.side-menu ul li a {
+	text-decoration: none;
+	color: var(--font);
+}
+
+.menu-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background: rgba(0, 0, 0, .3);
+	display: none;
+	z-index: 900;
+}
+
+.menu-overlay.show {
+	display: block;
+}
+
+/* 채팅 영역 */
+.chat-container {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	padding: 15px;
+	overflow-y: auto;
+	padding-bottom: 150px; /* ✅ 입력창이 가리지 않도록 여백 추가 */
+}
+
+.message {
+	max-width: 70%; /* ✅ 모바일에서 더 넓게 보이도록 수정 */
+	padding: 10px 15px;
+	margin: 8px 0;
+	border-radius: 8px;
+	line-height: 1.4;
+	font-size: var(--msg-font-size, 17px);
+}
+
+.bot {
+	background-color: var(--bot-bg);
+	align-self: flex-start;
+}
+
+.user {
+	background-color: var(--user-bg);
+	color: var(--user-txt);
+	align-self: flex-end;
+}
+
+/* 입력창(채팅) */
+.input-container {
+	position: fixed; /* ✅ 화면 하단에 고정 */
+	bottom: 0;
+	left: 0;
+	right: 0;
+	display: flex;
+	padding: 10px;
+	background: #fff;
+	border-top: 1px solid var(--card-border);
+}
+
+.input-container>input[type="text"] {
+	flex: 1;
+	padding: 10px;
+	border: 1px solid #ccc;
+	border-radius: 6px;
+	font-size: 16px;
+}
+
+/* 기본 버튼 */
+button {
+	background-color: var(--user-bg);
+	color: var(--user-txt);
+	border: none;
+	padding: 10px 18px;
+	margin-left: 8px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 18px;
+}
+
+button:hover {
+	background-color: #303f9f;
+}
+
+/* 마이크 버튼 애니메이션 */
+.mic-btn.active {
+	background: #fef3c7;
+	color: #ea580c;
+	animation: pulse 1s infinite;
+}
+.mic-btn.recording { animation: pulse 1s infinite; outline: none; }
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pulse{ 
+	0%{box-shadow:0 0 0 0 #fcc41944} 
+	70%{box-shadow:0 0 0 12px #fbbf2440} 
+	100%{box-shadow:0 0 0 0 #fbbf2400} }
+
+/* 봇 응답 내 리스트 */
+.message ul {
+	margin: 8px 0 8px 18px;
+	padding-left: 22px;
+}
+
+.message li {
+	margin-bottom: 3px;
+	font-size: inherit;
+	line-height: 1.6;
+}
+
+/* 프로필/히스토리 카드 */
+.profile-card, .history-card {
+	margin: 12px 14px;
+	padding: 12px;
+	border: 1px solid #e5e7eb;
+	border-radius: 12px;
+	background: #fff;
+}
+
+.profile-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.history-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.history-table th, .history-table td {
+	border-bottom: 1px solid #e5e7eb;
+	padding: 8px;
+	text-align: left;
+	vertical-align: top;
+}
+
+.empty-hint {
+	color: #6b7280;
+	font-size: .95rem;
+	padding: 8px 0;
+}
+
+#profileSection {
+	max-height: 22vh;
+	overflow: auto;
+}
+
+#historySection {
+	max-height: 38vh;
+	overflow: auto;
+}
+
+.history-card .history-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin: 4px 0 12px;
+}
+
+.icon-btn {
+	background: transparent;
+	border: 1px solid #e5e7eb;
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
+.icon-btn:hover {
+	background: #f3f4f6;
+}
+
+.hidden {
+	display: none !important;
+}
+
+/* 섹션형 봇 메시지 */
+.message.bot.section {
+	background: #e9eef5;
+}
+
+.section-title {
+	font-weight: 700;
+	margin-bottom: 6px;
+}
+
+/* 다크모드 */
+body.dark {
+	--bg: #181a1b;
+	--header: #23262f;
+	--bot-bg: #23262f;
+	--user-bg: #5e73fa;
+	--user-txt: #fff;
+	--font: #eee;
+	--card-border: #34373a;
+}
+
+body.dark .side-menu {
+	background-color: #23262f;
+}
+
+body.dark .profile-card, body.dark .history-card {
+	background: #0b1220;
+	border-color: #374151;
+	color: #e5e7eb;
+}
+
+body.dark .history-table th, body.dark .history-table td {
+	border-color: #374151;
+	color: #e5e7eb;
+}
+
+body.dark .empty-hint {
+	color: #9ca3af;
+}
+
+body.dark .input-container {
+	background: #111827;
+	border-top: 1px solid #374151;
+}
+
+body.dark .input-container>input[type="text"] {
+	background: #111827;
+	color: #e5e7eb;
+	border-color: #374151;
+}
+
+body.dark .input-container>input[type="text"]::placeholder {
+	color: #9ca3af;
+}
+
+body.dark .icon-btn {
+	border-color: #374151;
+}
+
+body.dark .icon-btn:hover {
+	background: #111827;
+}
+
+body.dark .message.bot.section {
+	background: #23262f;
+}
+
+
+/* 모달(회원가입/로그인) 공통 컨트롤 */
+
+/* 1) 모달 프레임 */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 1100;
+}
+.modal .modal-content {
+  position: relative;
+  background: #fff;
+  color: #111;
+  max-width: 360px; /* ✅ 수정: PC용 기본 크기 */
+  width: 92%;
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: 10vh auto;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  padding: 18px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.25);
+  box-sizing: border-box;
+}
+.close-btn {
+  position: absolute; right: 12px; top: 10px;
+  background: transparent; border: 0; font-size: 24px; cursor: pointer;
+}
+
+/* 2) 폼 레이아웃 */
+.modal .modal-content form{
+  display:flex; flex-wrap:wrap; gap:12px; justify-content:center;
+}
+.modal .modal-content label{
+  display:block; width:100%; margin-top:4px; font-size:14px;
+}
+
+/* ✅ 모바일 환경에만 적용될 스타일 */
+@media screen and (max-width: 600px) {
+    .message {
+        max-width: 85%;
+        font-size: var(--msg-font-size, 16px) !important;
+    }
+    /* ✅ 수정: 모바일 전용 모달 스타일을 미디어 쿼리 안에 넣음 */
+    .modal .modal-content {
+        max-width: 95%; 
+        width: 95%;
+        margin: 5vh auto;
+    }
+    .input-container>input[type="text"] {
+        font-size: 14px;
+    }
+    .font-btn-group button, .dark-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 12px;
+    }
+}
+
+/* 3) 입력 컨트롤 공통(높이 통일) */
+:root { --field-w: 320px; }
+.modal .form-control{
+  width: 100%;
+  height: 44px;
+  padding: 10px 12px;
+  font-size: 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff; color: var(--font);
+  box-sizing: border-box;
+  appearance: none; -webkit-appearance: none;
+}
+
+/* 4) 필드 폭 */
+#signupModal .input-with-icon,
+#loginModal  .input-with-icon,
+#signupModal .form-control,
+#loginModal  .form-control{
+  max-width: var(--field-w);
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 5) 기저질환 */
+#signupModal textarea.form-control{
+  height: 44px; min-height:44px; resize: none; overflow: hidden;
+}
+
+/* 6) 눈 아이콘 */
+.input-with-icon{ position:relative; width:100%; }
+.input-with-icon .form-control{ padding-right: 44px; }
+.input-with-icon .pw-toggle{
+  position:absolute; right: 8px; top:50%; transform: translateY(-50%);
+  display:flex; align-items:center; justify-content:center;
+  width: 36px; height: 100%;
+  padding:0; margin:0; line-height:0;
+  background:transparent; border:none; cursor:pointer; color:#9ca3af;
+}
+.input-with-icon .pw-toggle:hover{ color:#6b7280; }
+.input-with-icon .pw-toggle.fa{ width:36px !important; }
+
+/* 7) 제출 버튼 */
+#signupModal .submit-btn,
+#loginModal  .submit-btn{
+  display:block;
+  width: 100%;
+  max-width: var(--field-w);
+  height:44px;
+  margin: 8px auto 0;
+}
+
+/* 8) number 스피너 제거 */
+.modal input[type=number]::-webkit-outer-spin-button,
+.modal input[type=number]::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+.modal input[type=number]{ -moz-appearance:textfield; }
+
+/* 9) 다크모드 */
+body.dark .modal .modal-content{ background:#0b1220; color:#e5e7eb; border-color:#374151; }
+body.dark .modal .form-control{ background:#111827; color:#e5e7eb; border-color:#374151; }
+body.dark .modal .form-control::placeholder{ color:#9ca3af; }
+body.dark .input-with-icon .pw-toggle{ color:#9ca3af; }
+body.dark .input-with-icon .pw-toggle:hover{ color:#cbd5e1; }
+
+/* 회원가입 모달 - 성별 필드 왼쪽 정렬 */
+#signupModal .gender-group {
+  display: flex;
+  justify-content: flex-start; 
+  gap: 16px;                   
+  max-width: var(--field-w);   
+  margin: 0 auto 0 0;          
+}
+
+#signupModal .gender-group label {
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 4px; 
+}
+
+/* 프로필 헤더: 좌측 제목 + 우측 '확장' 텍스트 버튼 */
+.profile-header-row{
+  display:flex; align-items:center; justify-content:space-between;
+  margin:4px 0 12px;
+}
+.profile-title{ margin:0; }
+
+/* 테두리 없는 글자형 버튼 */
+.toggle-link{
+  background:transparent; border:0; padding:0;
+  font: inherit; font-weight:700; cursor:pointer;
+  color:#5e73fa;                /* 라이트 모드 포인트 컬러 */
+}
+.toggle-link:hover{ text-decoration:underline; }
+.toggle-link[aria-expanded="true"]{ color:#6b7280; } /* 펼쳐진 상태의 중간톤 */
+
+/* 다크 모드 컬러 보정 */
+body.dark .toggle-link{ color:#9db1ff; }
+body.dark .toggle-link[aria-expanded="true"]{ color:#cbd5e1; }
+
+/* ⚠️ 의료 면책 고지 배너 */
+.medical-disclaimer {
+	margin: 10px 16px 0;
+	padding: 10px 12px;
+	border: 1px solid #facc15;
+	border-left-width: 4px;
+	border-radius: 10px;
+	background: #fff7e6;
+	color: #7a5200;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+body.dark .medical-disclaimer {
+	border-color: rgba(245, 205, 11, .35);
+	background: rgba(245, 158, 11, .15);
+	color: #f0d38a;
+}
+
+@media screen and (max-width: 600px) {
+	.medical-disclaimer {
+		margin: 8px 10px 0;
+		font-size: 12px;
+	}
+}

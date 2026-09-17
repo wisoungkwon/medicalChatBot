@@ -1,0 +1,72 @@
+# ── 비밀정보 (절대 커밋 금지) ──────────────────────────────────────
+.env
+*.env
+!*.env.example
+
+# ngrok 설정에는 authtoken 이 들어간다. 실행 파일도 25MB 바이너리다.
+ngrok/
+
+# 로컬 전용 Spring 설정 (DB 비밀번호 등)
+**/application-local.properties
+**/application-secret.properties
+
+# ── 빌드 산출물 ────────────────────────────────────────────────────
+target/
+build/
+!**/src/main/**/target/
+!**/src/test/**/target/
+.mvn/wrapper/maven-wrapper.jar
+
+# ── Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# ── 벡터 인덱스 (재생성 가능한 산출물) ─────────────────────────────
+# dataset/*.csv 와 json_data/ 에서 FORCE_REBUILD=1 로 다시 만들 수 있다.
+# 대용량 바이너리라 Git 에 두면 저장소가 급격히 무거워진다.
+*.faiss
+*.pkl
+**/faiss_unified_disease_db/
+**/faiss_db_*/
+**/vector_db/
+**/vector_e5_large_with_meds/
+
+# ── 학습 산출물 (LoRA 체크포인트 등) ───────────────────────────────
+# optimizer.pt 등 수십 MB 단위 파일이 들어있다. 필요하면 별도 저장소나
+# 모델 레지스트리(HF Hub 등)로 관리하는 편이 맞다.
+*.pt
+*.bin
+*.safetensors
+*.onnx
+**/lora_exaone_output/
+**/checkpoint-*/
+
+# ── IDE ────────────────────────────────────────────────────────────
+.metadata/
+.classpath
+.project
+.settings/
+.apt_generated
+.factorypath
+.springBeans
+.sts4-cache
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# ── OS ─────────────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+desktop.ini
+.DS_Store
+
+# ngrok-sync 가 자동 생성하는 주소 파일 (실행할 때마다 바뀜)
+scripts/server-env.json
+scripts/ngrok-env.json
+scripts/ngrok-env.cmd

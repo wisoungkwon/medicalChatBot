@@ -1,0 +1,20 @@
+# 줄바꿈을 파일 종류에 맞게 고정한다.
+# 이걸 안 두면 Windows 에서 커밋한 CRLF 가 그대로 올라가 리눅스/맥에서
+# mvnw 가 실행되지 않거나(bad interpreter) 스크립트가 깨진다.
+* text=auto
+
+# Windows 전용 스크립트 - CRLF 유지
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+# 유닉스에서 실행되는 것 - LF 유지
+mvnw   text eol=lf
+*.sh   text eol=lf
+
+# 바이너리 (git 이 텍스트로 손대지 않게)
+*.png  binary
+*.jpg  binary
+*.xlsx binary
+*.faiss binary
+*.pkl  binary

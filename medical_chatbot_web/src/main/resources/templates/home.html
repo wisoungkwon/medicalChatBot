@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MedAssist Beta — AI 의료 챗봇 프리-런칭</title>
+  <meta name="description" content="AI 기반 건강 정보 보조 서비스(베타) 프리-런칭 랜딩 페이지" />
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #0b0b0b;
+      --muted: #666;
+      --card: #ffffff;
+      --border: rgba(0,0,0,.08);
+      --brand1: #4f46e5; /* indigo-600 */
+      --brand2: #0ea5e9; /* sky-500 */
+      --brand-contrast: #ffffff;
+      --success: #16a34a;
+      --amber-bg: #fff7e6;
+      --amber-bd: #facc15;
+    }
+    .dark {
+      --bg: #0a0a0a;
+      --fg: #f3f3f3;
+      --muted: #b0b0b0;
+      --card: #111213;
+      --border: rgba(255,255,255,.12);
+      --amber-bg: rgba(245, 158, 11, .15);
+      --amber-bd: rgba(245, 205, 11, .35);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      background: var(--bg); color: var(--fg);
+    }
+    a { color: inherit; text-decoration: none; }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+    .banner { background: linear-gradient(90deg, var(--brand1), var(--brand2)); color: #fff; font-size: 14px; }
+    .banner .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+    .btn-ghost { background: rgba(255,255,255,.12); color: #fff; border: 0; padding: 6px 10px; border-radius: 10px; cursor: pointer; font-size: 12px; }
+
+    header { position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(180%) blur(10px); background: color-mix(in oklab, var(--bg) 80%, transparent); border-bottom: 1px solid var(--border); }
+    .nav { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -.2px; }
+    .brand .logo { width: 28px; height: 28px; color: var(--brand1); }
+    .navlinks { display: none; gap: 18px; font-size: 14px; }
+    .cta { display: flex; gap: 8px; }
+    .btn { border: 1px solid var(--border); background: transparent; color: var(--fg); padding: 10px 14px; border-radius: 12px; font-weight: 600; cursor: pointer; font-size: 14px; }
+    .btn.primary { background: var(--brand1); color: #fff; border-color: transparent; }
+    .btn:hover { opacity: .95; }
+
+    @media (min-width: 768px) {
+      .navlinks { display: flex; }
+    }
+
+    .hero { padding: 56px 0 32px; }
+    .grid { display: grid; gap: 24px; }
+    @media (min-width: 900px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+    .title { font-size: clamp(28px, 4vw, 44px); line-height: 1.15; font-weight: 900; letter-spacing: -.4px; }
+    .title .grad { background: linear-gradient(90deg, var(--brand1), var(--brand2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { color: var(--muted); margin-top: 12px; font-size: 16px; }
+    .kicker { margin-top: 16px; list-style: none; padding: 0; color: var(--muted); font-size: 14px; }
+    .kicker li { display: flex; gap: 8px; align-items: flex-start; }
+    .kicker .check { color: var(--success); margin-top: 2px; }
+
+    .mockwrap { position: relative; }
+    .glow { position: absolute; inset: -8px; border-radius: 28px; filter: blur(26px); background: linear-gradient(90deg, color-mix(in oklab, var(--brand1) 30%, transparent), color-mix(in oklab, var(--brand2) 30%, transparent)); }
+    .card { position: relative; border: 1px solid var(--border); border-radius: 26px; background: var(--card); box-shadow: 0 10px 30px rgba(0,0,0,.08); overflow: hidden; }
+    .windowbar { background: color-mix(in oklab, var(--fg) 8%, transparent); padding: 6px 10px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+    .dot { width: 8px; height: 8px; border-radius: 999px; }
+    .dot.red { background: #f87171; } .dot.amber { background: #fbbf24; } .dot.green { background: #34d399; }
+    .mockbody { padding: 16px; }
+    .chatrow { display: flex; gap: 12px; }
+    .avatar { width: 34px; height: 34px; border-radius: 999px; display: grid; place-items: center; font-weight: 800; }
+    .avatar.user { background: var(--brand1); color: #fff; }
+    .avatar.ai { background: color-mix(in oklab, var(--fg) 10%, transparent); color: var(--fg); }
+    .meta { color: var(--muted); font-size: 12px; }
+    .bubble { margin-top: 4px; font-size: 14px; line-height: 1.5; }
+    .summary { margin-top: 12px; border: 1px solid var(--border); border-radius: 14px; padding: 10px; background: color-mix(in oklab, var(--bg) 92%, transparent); font-size: 12px; color: var(--muted); }
+    .inputrow { margin-top: 16px; display: flex; gap: 8px; }
+    .input { flex: 1; border: 1px solid var(--border); background: var(--bg); color: var(--fg); padding: 10px 12px; border-radius: 12px; font-size: 14px; }
+
+    .section { padding: 56px 0; border-top: 1px solid var(--border); }
+    .section h2 { font-size: clamp(22px, 3vw, 32px); font-weight: 900; margin: 0; }
+    .muted { color: var(--muted); }
+
+    .cards { display: grid; gap: 16px; grid-template-columns: 1fr; }
+    @media (min-width: 640px){ .cards { grid-template-columns: repeat(2, 1fr); }}
+    @media (min-width: 1024px){ .cards { grid-template-columns: repeat(3, 1fr); }}
+    .cardbox { border: 1px solid var(--border); border-radius: 18px; background: var(--card); padding: 18px; }
+    .cardbox h3 { margin: 0 0 6px; font-size: 16px; }
+    .step { border: 1px solid var(--border); border-radius: 18px; padding: 18px; background: var(--card); }
+    .stepnum { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; background: var(--brand1); color: #fff; font-weight: 800; margin-right: 8px; }
+
+    .notice { border: 1px solid var(--amber-bd); background: var(--amber-bg); color: #9a6700; border-radius: 16px; padding: 14px; font-size: 13px; }
+
+    footer { border-top: 1px solid var(--border); }
+    .footgrid { display: grid; gap: 20px; grid-template-columns: 1fr; padding: 40px 0; }
+    @media (min-width: 900px){ .footgrid { grid-template-columns: repeat(4, 1fr); }}
+    .fhead { font-weight: 700; margin-bottom: 10px; }
+    .flist { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; font-size: 14px; }
+    .copyright { text-align: center; font-size: 12px; color: var(--muted); padding-bottom: 28px; }
+
+    .consent { position: fixed; inset: auto 0 0 0; z-index: 30; }
+    .consent .inner { margin: 12px auto; max-width: 1120px; background: color-mix(in oklab, var(--bg) 96%, transparent); border: 1px solid var(--border); border-radius: 16px; padding: 14px; backdrop-filter: blur(10px); }
+    .consent .row { display: flex; flex-direction: column; gap: 10px; }
+    @media (min-width: 768px){ .consent .row { flex-direction: row; align-items: center; justify-content: space-between; }}
+
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .skip:focus { position: absolute; top: 10px; left: 10px; background: var(--brand1); color: #fff; padding: 8px 10px; border-radius: 10px; z-index: 50; }
+  </style>
+</head>
+<body>
+  <!-- Announcement Banner -->
+  <div class="banner">
+    <div class="container row">
+      <p><strong>프리릴리즈 베타</strong> · 실제 의료행위가 아닌 정보 제공 서비스입니다.</p>
+      <button id="darkToggle" class="btn-ghost" type="button">다크 모드</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="container nav">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 24 24" aria-hidden>
+          <path fill="currentColor" d="M12 3c-3.866 0-7 3.134-7 7 0 4.667 5.5 10 7 11 1.5-1 7-6.333 7-11 0-3.866-3.134-7-7-7Zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z" />
+        </svg>
+        MedAssist <span style="color: var(--brand1);">Beta</span>
+      </div>
+      <nav class="navlinks" aria-label="주요">
+        <a href="#features">기능</a>
+        <a href="#how">작동 원리</a>
+        <a href="#security">보안 · 개인정보</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="cta">
+        <!-- 로그인/회원가입은 별도 페이지가 아니라 /chatbot 화면의 모달로 제공된다.
+             예전에는 /login, /signup 으로 링크되어 404 였다. -->
+        <a class="btn" href="/chatbot">로그인</a>
+        <a class="btn primary" href="/chatbot">회원가입</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container grid two">
+        <div>
+          <h1 class="title">증상부터 빠르게, <span class="grad">신뢰 가능한 1차 답변</span>을.</h1>
+          <p class="lead">MedAssist는 개인 건강정보를 기반으로 증상 요약과 안내 정보를 제공하는 AI 보조 서비스입니다. <strong>의료진의 진단을 대체하지 않으며</strong>, 더 나은 상담을 위한 사전 단계로 설계되었습니다.</p>
+          <div style="margin-top:18px; display:flex; gap:10px; flex-wrap: wrap;">
+            <a class="btn primary" href="/chatbot">AI 챗봇 바로가기</a>
+            <a class="btn" href="#how">작동 방식 보기</a>
+          </div>
+          
+          <ul class="kicker">
+            <li><span class="check">✔</span> 개인정보 최소 수집 · 선택 동의 기반</li>
+            <li><span class="check">✔</span> 로그인 시 과거 진단 기록 연동 (옵션)</li>
+            <li><span class="check">✔</span> 다크모드, 모바일 최적화</li>
+          </ul>
+        </div>
+        
+        <div class="mockwrap" aria-hidden>
+          <div class="glow"></div>
+          <div class="card">
+            <div class="windowbar"><span class="dot red"></span><span class="dot amber"></span><span class="dot green"></span><span style="margin-left:8px;">/chat (demo)</span></div>
+            <div class="mockbody">
+              <div class="chatrow">
+                <div class="avatar user">사용</div>
+                <div style="flex:1;">
+                  <div class="meta">사용자 · 09:41</div>
+                  <div class="bubble">어제부터 기침이 나고 미열이 있어요. 목도 따갑습니다.</div>
+                </div>
+              </div>
+              <div class="chatrow" style="margin-top:14px;">
+                <div class="avatar ai">AI</div>
+                <div style="flex:1;">
+                  <div class="meta">MedAssist · 응답중…</div>
+                  <div class="bubble">증상을 요약하는 중…</div>
+                  <div class="summary">요약: 마른기침·인후통·37.5℃ 전후 미열. 수분섭취·휴식 권장. 악화 시 진료 권고.</div>
+                </div>
+              </div>
+              <div class="inputrow">
+                <input class="input" type="text" placeholder="증상을 입력하세요" aria-label="증상 입력" />
+                <a class="btn primary" href="/chatbot">직접해보기</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="section">
+      <div class="container">
+        <h2>주요 기능</h2>
+        <p class="muted" style="margin-top:8px;">초기 단계에서 꼭 필요한 것만 담았습니다. 점차 확장 예정입니다.</p>
+        <div class="cards" style="margin-top:18px;">
+          <div class="cardbox"><h3>증상 요약 & 안내</h3><p class="muted">입력한 증상을 구조화해 빠르게 핵심만 제시합니다.</p></div>
+          <div class="cardbox"><h3>개인정보 보호</h3><p class="muted">민감정보 최소화, 로깅 정책, 이용자 동의 절차 반영.</p></div>
+          <div class="cardbox"><h3>기록 연동(선택)</h3><p class="muted">로그인 시 과거 진단 결과를 불러와 연속성 있는 상담.</p></div>
+          <div class="cardbox"><h3>스트리밍 응답(예정)</h3><p class="muted">대기시간을 줄이는 SSE 기반 실시간 응답 UI.</p></div>
+          <div class="cardbox"><h3>다크모드</h3><p class="muted">눈의 피로를 낮추는 명암 최적화.</p></div>
+          <div class="cardbox"><h3>확장 가능한 구조</h3><p class="muted">Spring Boot + MySQL 백엔드와 무리 없이 연동.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how" class="section">
+      <div class="container">
+        <h2>작동 원리</h2>
+        <div class="cards" style="margin-top:18px; grid-template-columns: repeat(3, 1fr);">
+          <div class="step"><span class="stepnum">1</span><strong>증상 입력</strong><div class="muted" style="margin-top:8px;">간단한 문장으로 증상을 적거나 음성으로 입력합니다.</div></div>
+          <div class="step"><span class="stepnum">2</span><strong>AI 요약 & 안내</strong><div class="muted" style="margin-top:8px;">서버에서 증상을 요약·정리하고, 참고용 안내 정보를 제공합니다.</div></div>
+          <div class="step"><span class="stepnum">3</span><strong>다음 단계 연결</strong><div class="muted" style="margin-top:8px;">필요 시 병원 방문 권고, 상담 준비 체크리스트 등 후속 액션 제공.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Security -->
+    <section id="security" class="section">
+      <div class="container">
+        <h2>보안 · 개인정보</h2>
+        <div class="cards" style="margin-top:18px;">
+          <div class="cardbox">
+            <h3>데이터 처리 원칙</h3>
+            <ul class="muted" style="margin-top:8px; padding-left:18px;">
+              <li>최소 수집 · 목적 외 이용 금지</li>
+              <li>전송 구간 암호화(HTTPS)</li>
+              <li>로그 보존 기간 및 열람 통제</li>
+              <li>이용자 동의 철회 및 삭제 요청 절차</li>
+            </ul>
+          </div>
+          <div class="cardbox">
+            <h3>법적/정책적 안내</h3>
+            <p class="muted" style="margin-top:8px;">본 서비스는 <strong>의료법상 의료행위가 아닌 정보제공 서비스</strong>로, 전문가의 진단을 대체하지 않습니다. 응급상황이 의심될 경우 즉시 119 또는 가까운 응급실을 이용하세요. 자세한 내용은 <a href="#privacy" style="text-decoration:underline; color:var(--brand1);">개인정보처리방침</a> 및 <a href="#terms" style="text-decoration:underline; color:var(--brand1);">이용약관</a>을 확인해 주세요.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="section">
+      <div class="container">
+        <h2>자주 묻는 질문</h2>
+        <div class="cards" style="margin-top:18px;">
+          <details class="cardbox"><summary style="cursor:pointer; font-weight:700;">의료행위를 대체하나요?</summary><div class="muted" style="margin-top:8px;">아닙니다. 본 서비스는 참고용 정보 제공이며, 정확한 진단과 처방은 의료진에게 받으셔야 합니다.</div></details>
+          <details class="cardbox"><summary style="cursor:pointer; font-weight:700;">내 정보는 안전한가요?</summary><div class="muted" style="margin-top:8px;">전송 구간 암호화(HTTPS)와 최소 수집 원칙을 따르며, 보존 기간과 접근 권한을 엄격히 관리합니다.</div></details>
+          <details class="cardbox"><summary style="cursor:pointer; font-weight:700;">로그인 없이도 이용 가능하나요?</summary><div class="muted" style="margin-top:8px;">예. 다만 과거 기록 연동 등 일부 맞춤 기능은 로그인 후 이용 가능합니다.</div></details>
+          <details class="cardbox"><summary style="cursor:pointer; font-weight:700;">응답이 느린데 개선되나요?</summary><div class="muted" style="margin-top:8px;">점진적으로 스트리밍 응답(SSE)과 캐싱을 도입해 대기 시간을 줄일 예정입니다.</div></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- Legal Notice -->
+    <section class="section">
+      <div class="container">
+        <div class="notice"><strong>중요 고지:</strong> MedAssist는 의학적 조언을 제공하지 않습니다. 건강 상태가 악화되거나 응급이 의심될 경우 즉시 전문 의료기관을 이용하세요.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footgrid">
+      <div>
+        <div class="brand"><svg class="logo" viewBox="0 0 24 24" aria-hidden><path fill="currentColor" d="M12 3c-3.866 0-7 3.134-7 7 0 4.667 5.5 10 7 11 1.5-1 7-6.333 7-11 0-3.866-3.134-7-7-7Zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"/></svg> <strong>MedAssist</strong></div>
+        <p class="muted" style="margin-top:10px;">AI 기반 건강 정보 보조 서비스(베타)</p>
+      </div>
+      <div>
+        <div class="fhead">바로가기</div>
+        <ul class="flist">
+          <li><a href="/chatbot">증상 체크</a></li>
+          <li><a href="/chatbot">로그인</a></li>
+          <li><a href="/chatbot">회원가입</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="fhead">정책</div>
+        <ul class="flist">
+          <li><a id="terms" href="#">이용약관(초안)</a></li>
+          <li><a id="privacy" href="#">개인정보처리방침(초안)</a></li>
+        </ul>
+      </div>
+      <div>
+        <div class="fhead">문의</div>
+        <ul class="flist">
+          <li><a href="mailto:contact@medassist.local">contact@medassist.local</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="copyright">© <span id="year"></span> MedAssist. All rights reserved.</div>
+  </footer>
+
+  <!-- Cookie Consent -->
+  <div id="consent" class="consent" role="region" aria-label="쿠키 동의 배너" hidden>
+    <div class="inner container">
+      <div class="row">
+        <p class="muted" style="margin:0;">서비스 품질 개선을 위해 일부 쿠키를 사용합니다. 자세한 내용은 개인정보처리방침을 확인하세요.</p>
+        <div style="display:flex; gap:8px;">
+          <button id="accept" class="btn primary" type="button">동의</button>
+          <a class="btn" href="#privacy">자세히</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Dark mode init
+    // 저장 키 'prefers-dark' 는 chatbot.js 와 공유한다(페이지 이동 시 상태 유지).
+    // 저장값이 없으면 OS 설정을 따른다. 예전에는 무조건 다크로 켜졌다.
+    (function(){
+      var on = false;
+      try {
+        var pref = localStorage.getItem('prefers-dark');
+        if (pref !== null) {
+          on = (pref === 'true');
+        } else {
+          var legacy = localStorage.getItem('darkMode'); // 이전 키 마이그레이션
+          if (legacy !== null) on = (legacy === 'on');
+          else on = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        }
+      } catch (e) { on = false; }
+      document.documentElement.classList.toggle('dark', on);
+      if (document.body) document.body.classList.toggle('dark', on);
+    })();
+    document.getElementById('darkToggle').addEventListener('click', function(){
+      var on = !document.documentElement.classList.contains('dark');
+      document.documentElement.classList.toggle('dark', on);
+      if (document.body) document.body.classList.toggle('dark', on);
+      try {
+        localStorage.setItem('prefers-dark', String(on));
+        localStorage.removeItem('darkMode');
+      } catch(e){}
+    });
+
+    // Cookie consent
+    (function(){
+      var ok = false;
+      try { ok = localStorage.getItem('cookie-consent') === 'accepted'; } catch(e) {}
+      var el = document.getElementById('consent');
+      if (!ok && el) el.hidden = false;
+      var accept = document.getElementById('accept');
+      if (accept) accept.addEventListener('click', function(){
+        try { localStorage.setItem('cookie-consent', 'accepted'); } catch(e){}
+        el.hidden = true;
+      });
+    })();
+
+    // Year
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

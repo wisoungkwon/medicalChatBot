@@ -1,0 +1,31 @@
+# MedChatBot - Flask AI 백엔드 의존성
+#
+# 설치:
+#   python -m venv .venv
+#   .venv\Scripts\activate          (Windows)
+#   pip install -r requirements.txt
+#
+# GPU(CUDA)를 쓰려면 torch 를 아래 대신 공식 안내에 맞춰 따로 설치하세요:
+#   https://pytorch.org/get-started/locally/
+
+# --- 웹 프레임워크 ---
+Flask>=3.0,<4.0
+flask-cors>=4.0,<6.0
+python-dotenv>=1.0
+
+# 운영용 WSGI 서버 (개발 서버 app.run 대신 사용)
+#   waitress-serve --host=0.0.0.0 --port=5050 Backend_Flask_API:app
+waitress>=3.0
+
+# --- LLM 클라이언트 (FriendliAI는 OpenAI 호환 API) ---
+openai>=1.30
+
+# --- 임베딩 / 벡터 검색 ---
+langchain-core>=0.2
+langchain-community>=0.2
+langchain-huggingface>=0.0.3
+sentence-transformers>=3.0
+faiss-cpu>=1.8
+
+# sentence-transformers 가 torch 를 끌어오지만, 버전을 고정하려면 명시한다.
+torch>=2.2
