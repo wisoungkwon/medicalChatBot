@@ -108,7 +108,16 @@ def main() -> None:
             top1 = names[0][1]
             top1_scores.append(top1)
             tuning_rows.append(
-                (top1, rank == 1, top1 - names[2][1] if len(names) >= 3 else 1.0)
+                {
+                    "top1": top1,
+                    "hit1": rank == 1,
+                    # LLM 은 top-5 후보를 통째로 받아 그 안에서 고른다. 그래서
+                    # "LLM 이 맞힐 수 있었는가" 의 기준은 Recall@1 이 아니라
+                    # 정답이 넘겨진 후보 안에 있었는지다.
+                    "hit_ctx": rank is not None and rank <= app.MAX_DISEASES,
+                    "gap": top1 - names[2][1] if len(names) >= 3 else 1.0,
+                    "item": item,
+                }
             )
             if top1 < app.LOW_CONF_THRESHOLD:
                 routed_chat += 1
@@ -187,7 +196,7 @@ def tune(rows) -> None:
     print("    증상 질의를 잡담으로 보내면(놓침) 최악이고,")
     print("    잡담을 증상으로 보면(오인) 엉뚱한 진단을 내놓는다.")
     print(f"    {'임계값':>8} {'증상질의 놓침':>14} {'비의료 걸러냄':>14}")
-    sym = [r[0] for r in rows]
+    sym = [r["top1"] for r in rows]
     for t in (0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70):
         miss = sum(1 for s in sym if s < t) / len(sym)
         caught = (sum(1 for s in neg_top1 if s < t) / len(neg_top1)) if neg_top1 else float("nan")
@@ -197,17 +206,62 @@ def tune(rows) -> None:
         print(f"    비의료 질의 1위점수: 최소 {ns[0]:.3f}  중앙 {ns[len(ns)//2]:.3f}  최대 {ns[-1]:.3f}"
               f"  (n={len(ns)})")
 
+    # 되묻기가 실제로 정확도를 올리는지 먼저 잰다.
+    # ask_symptoms 는 추가 증상이 붙으면 확신도와 무관하게 답한다(791행).
+    # 되묻기는 '한 번 더 물어보고 어차피 답하는' 구조이므로, 두 번째 라운드의
+    # 검색이 나아지지 않으면 임계값을 올려 봐야 지연만 늘어난다.
+    by_disease = defaultdict(list)
+    for r in rows:
+        by_disease[r["item"]["disease"]].append(r["item"]["query"])
+
     print()
-    print("  [HIGH_CONF_THRESHOLD] 이 위 + 격차 조건이면 바로 진단, 아니면 되묻기")
-    print("    바로 진단하는 비율을 올리면 되묻기가 줄지만, 그중 틀린 답이 는다.")
-    print(f"    {'임계값':>8} {'바로 진단':>12} {'그중 1위 정답률':>16} {'되묻기':>10}")
+    print("  [되묻기가 정확도를 올리는가]")
+    print("    첫 질의만 vs 같은 질병의 다른 발화를 '추가 증상' 으로 덧붙인 경우")
+    for i, r in enumerate(rows, 1):
+        item = r["item"]
+        pool = [q for q in by_disease[item["disease"]] if q != item["query"]]
+        if not pool:
+            r["follow_hit1"] = r["hit1"]
+            r["follow_ctx"] = r["hit_ctx"]
+            continue
+        # 결정적으로 고른다(실행마다 값이 흔들리면 비교가 안 된다).
+        extra = pool[item["position"] % len(pool)]
+        # ask_symptoms 의 search_query 조립과 동일한 형태.
+        got = retrieved_diseases(f"{item['query']}\n추가 정보: {extra}", app.K_DISEASE)
+        names = [n for n, _ in got]
+        rank = names.index(item["disease"]) + 1 if item["disease"] in names else None
+        r["follow_hit1"] = rank == 1
+        r["follow_ctx"] = rank is not None and rank <= app.MAX_DISEASES
+        if i % 400 == 0:
+            print(f"    ... {i}/{len(rows)}", file=sys.stderr)
+
+    n = len(rows)
+    print(f"    {'':>14} {'1위 정답':>10} {'후보 적중':>11}   (n={n})")
+    print(f"    {'첫 질의만':>14} {sum(r['hit1'] for r in rows)/n:10.1%} "
+          f"{sum(r['hit_ctx'] for r in rows)/n:11.1%}")
+    print(f"    {'추가 증상 후':>13} {sum(r['follow_hit1'] for r in rows)/n:10.1%} "
+          f"{sum(r['follow_ctx'] for r in rows)/n:11.1%}")
+
+    print()
+    print("  [HIGH_CONF_THRESHOLD]")
+    print(f"    '후보 적중' = 정답이 LLM 에 넘긴 top-{app.MAX_DISEASES} 안에 있었는가.")
+    print("    LLM 은 후보를 통째로 받아 그 안에서 고르므로 이쪽이 실질 상한이다.")
+    print("    '최종' = 바로 답한 사람 + 되물은 뒤 답한 사람을 합친 전체 결과.")
+    print("      되묻는 쪽은 어려운 질의만 모이므로, 그 집단의 실제 성적으로 계산한다.")
+    print(f"    {'임계값':>7} {'되묻기':>8} {'바로답한쪽':>11} {'되물은쪽':>10} "
+          f"{'최종 1위':>10} {'최종 후보':>10}")
     for t in (0.70, 0.74, 0.78, 0.80, 0.82, 0.85, 0.90):
-        direct = [r for r in rows if r[0] >= t and r[2] >= app.SCORE_DIFF_THRESHOLD]
+        direct = [r for r in rows if r["top1"] >= t and r["gap"] >= app.SCORE_DIFF_THRESHOLD]
         if not direct:
             continue
-        acc = sum(1 for r in direct if r[1]) / len(direct)
-        print(f"    {t:8.2f} {len(direct)/len(rows):11.1%} {acc:16.1%} "
-              f"{1 - len(direct)/len(rows):10.1%}")
+        direct_ids = {id(r) for r in direct}
+        asked = [r for r in rows if id(r) not in direct_ids]
+        d_ctx = sum(r["hit_ctx"] for r in direct) / len(direct)
+        a_ctx = (sum(r["follow_ctx"] for r in asked) / len(asked)) if asked else float("nan")
+        fin1 = (sum(r["hit1"] for r in direct) + sum(r["follow_hit1"] for r in asked)) / n
+        finc = (sum(r["hit_ctx"] for r in direct) + sum(r["follow_ctx"] for r in asked)) / n
+        print(f"    {t:7.2f} {len(asked)/n:8.1%} {d_ctx:11.1%} {a_ctx:10.1%} "
+              f"{fin1:10.1%} {finc:10.1%}")
     print("=" * 62)
 
 
