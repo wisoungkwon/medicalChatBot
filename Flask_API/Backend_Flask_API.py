@@ -95,6 +95,11 @@ os.makedirs(DB_DIR, exist_ok=True)
 # ------------------------------------------------------------
 FORCE_REBUILD = os.getenv("FORCE_REBUILD", "0") == "1"
 K_DISEASE = int(os.getenv("K_DISEASE", "10"))
+
+# 질병 하나가 여러 조각으로 인덱싱되므로, 서로 다른 질병 K_DISEASE 개를 채우려면
+# 조각을 그보다 넉넉히 가져와야 한다. 배수가 작으면 상위권이 한두 질병으로
+# 채워져 후보가 모자라고, 너무 크면 검색 비용만 는다.
+CHUNK_OVERSAMPLE = int(os.getenv("CHUNK_OVERSAMPLE", "6"))
 MAX_DISEASES = int(os.getenv("MAX_DISEASES", "5"))
 CTX_CHARS = int(os.getenv("CTX_CHARS", "4000"))
 
@@ -112,9 +117,19 @@ MAX_SYMPTOM_CHARS = int(os.getenv("MAX_SYMPTOM_CHARS", "2000"))
 #       sim 0.50 ~= d2 1.0  ~= cos 0.50 (느슨한 관련)
 #   - 코사인 유사도를 직접 쓰고 싶다면 인덱스를 MAX_INNER_PRODUCT 로 만들고
 #     임계값을 다시 잡아야 한다(인덱스 재생성 필요).
-# 기본값 0.5 는 최신 저장소(master)에서 0.4 -> 0.5 로 튜닝된 값을 따른 것이다.
-# 비의료 질문을 일반 대화로 보내는 기준을 더 엄격하게 잡는다.
-LOW_CONF_THRESHOLD = float(os.getenv("LOW_CONF_THRESHOLD", "0.5"))
+# 2026-09-18 재측정. 질병 JSON 의 증상 발화 1,920건(eval/eval_set.json)과
+# 비의료 질의 30건(eval/negative_queries.json)으로 잰 값이다.
+# 다시 재려면: python Flask_API/eval/eval_retrieval.py --tune
+#
+# LOW 0.5 -> 0.55: 증상 질의를 잡담으로 놓치는 비율은 0.1% -> 0.7% 로만 늘고,
+#   비의료 질의를 걸러내는 비율은 86.7% -> 96.7% 로 오른다.
+#   (0.60 이면 비의료를 100% 걸러내지만 증상 놓침이 3.2% 로 뛴다.)
+LOW_CONF_THRESHOLD = float(os.getenv("LOW_CONF_THRESHOLD", "0.55"))
+
+# HIGH 0.74 유지. 이 값에서 바로 진단하는 비율이 51.1%, 그중 1위 정답률 83.2% 다.
+#   0.70 으로 낮추면 되묻기가 38.3% 로 줄지만 정답률이 80.8% 로 떨어지고,
+#   0.80 으로 올리면 정답률 87.3% 대신 되묻기가 69.7% 로 는다.
+#   되묻기를 줄일지 정확도를 올릴지는 제품 판단이라 수치만 남겨 둔다.
 HIGH_CONF_THRESHOLD = float(os.getenv("HIGH_CONF_THRESHOLD", "0.74"))
 SCORE_DIFF_THRESHOLD = float(os.getenv("SCORE_DIFF_THRESHOLD", "0.03"))
 
@@ -342,9 +357,88 @@ def _needs_rebuild(index_path: str, source_folder: str) -> bool:
     return os.path.getmtime(idx) < _latest_json_mtime(source_folder)
 
 
+def _embedding_token_limit(default: int = 128) -> int:
+    """임베딩 모델이 실제로 받아들이는 토큰 수."""
+    client = getattr(embedding_model, "_client", None) or getattr(
+        embedding_model, "client", None
+    )
+    limit = getattr(client, "max_seq_length", None)
+    return int(limit) if limit else default
+
+
+def _chunk_text(text: str, max_tokens: int) -> List[str]:
+    """
+    긴 텍스트를 임베딩 한계 안에 들어가는 조각들로 나눈다.
+
+    <p>왜 필요한가 - 예전에는 질병 1건을 통째로 벡터 1개에 넣었다. 그런데
+    이 모델의 한계는 128토큰인데 문서는 중앙값 5,700토큰이었다. 100건 전부가
+    한계를 넘어, 각 문서의 **앞 4%만** 벡터가 되고 나머지는 버려졌다.
+    병명/원인/치료는 어느 문서에서도 임베딩된 적이 없었고, 증상을 3회 반복해
+    가중한 것도 첫 128토큰이 같으므로 아무 효과가 없었다.
+
+    <p>줄 단위로 끊어 담는다. extract_any() 가 항목을 줄바꿈으로 이어 붙이고
+    supplement 는 발화 하나가 한 줄이라, 줄 경계가 의미 경계와 거의 일치한다.
+    한 줄이 통째로 한계를 넘으면 그 줄만 토큰 단위로 강제 분할한다.
+    """
+    tokenizer = None
+    client = getattr(embedding_model, "_client", None) or getattr(
+        embedding_model, "client", None
+    )
+    if client is not None:
+        tokenizer = getattr(client, "tokenizer", None)
+
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return []
+
+    def n_tokens(s: str) -> int:
+        if tokenizer is None:
+            # 토크나이저를 못 얻는 경우의 보수적 근사(한국어는 대략 1토큰 <= 2자).
+            return (len(s) + 1) // 2
+        return len(tokenizer.encode(s, add_special_tokens=False))
+
+    # 특수 토큰([CLS]/[SEP]) 자리를 남겨 둔다.
+    budget = max(16, max_tokens - 8)
+
+    chunks: List[str] = []
+    current: List[str] = []
+    current_n = 0
+
+    for line in lines:
+        ln = n_tokens(line)
+        if ln > budget:
+            # 한 줄이 예산을 넘는다. 담고 있던 것을 먼저 비우고 이 줄을 쪼갠다.
+            if current:
+                chunks.append("\n".join(current))
+                current, current_n = [], 0
+            if tokenizer is None:
+                step = budget * 2  # 위 근사의 역수(토큰 -> 글자)
+                for i in range(0, len(line), step):
+                    chunks.append(line[i : i + step])
+            else:
+                ids = tokenizer.encode(line, add_special_tokens=False)
+                for i in range(0, len(ids), budget):
+                    piece = tokenizer.decode(ids[i : i + budget], skip_special_tokens=True).strip()
+                    if piece:
+                        chunks.append(piece)
+            continue
+
+        if current_n + ln > budget:
+            chunks.append("\n".join(current))
+            current, current_n = [line], ln
+        else:
+            current.append(line)
+            current_n += ln
+
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
 def build_or_load_unified_disease_db():
     if _needs_rebuild(UNIFIED_DB_PATH, JSON_FOLDER):
-        log.info("[Rebuild] 통합 질병 인덱스 (검색용/LLM용 분리)를 새로 생성한다.")
+        token_limit = _embedding_token_limit()
+        log.info("[Rebuild] 통합 질병 인덱스를 새로 생성한다. (조각 한계 %d토큰)", token_limit)
         texts_for_embedding, metas = [], []
         files = sorted([f for f in os.listdir(JSON_FOLDER) if f.endswith(".json")])
 
@@ -358,11 +452,7 @@ def build_or_load_unified_disease_db():
 
             symptom_data = data.get("증상", {})
             # extract_any() 는 supplement 를 이미 포함해서 반환한다.
-            # 이전에는 supplement 를 여기서 한 번 더 붙여 총 6회 반복되어,
-            # 보조 설명이 본 증상보다 과하게 가중되고 있었다.
             symptom_text = extract_any(symptom_data)
-
-            weighted_symptom_part = f"[증상] {symptom_text}\n" * 3
 
             other_info_parts = [f"[병명] {disease_name}"]
             for key, value in data.items():
@@ -371,22 +461,38 @@ def build_or_load_unified_disease_db():
                     if content:
                         other_info_parts.append(f"[{key}] {content}")
             other_info_part = "\n".join(other_info_parts)
-            weighted_document_text = (weighted_symptom_part + other_info_part).strip()
-            texts_for_embedding.append(weighted_document_text)
 
-            clean_symptom_part = f"[증상] {symptom_text}"
-            clean_document_text = (clean_symptom_part + "\n" + other_info_part).strip()
-            metas.append(
-                {
-                    "병명": disease_name,
-                    "파일": filename,
-                    "clean_text": clean_document_text,
-                }
-            )
+            # LLM 에게 줄 원문. 검색은 조각으로 하지만 답변 생성에는 질병 정보가
+            # 통째로 필요하므로, 모든 조각이 이 전체 텍스트를 함께 들고 다닌다.
+            clean_document_text = (
+                f"[증상] {symptom_text}\n" + other_info_part
+            ).strip()
+
+            # 검색용 조각.
+            #   - 증상을 3회 반복하던 가중치는 없앴다. 어차피 첫 128토큰만
+            #     임베딩되므로 반복은 결과에 영향을 주지 못하면서 인덱스 크기만
+            #     3배로 불렸다.
+            #   - 증상 서술이 검색의 핵심이라 조각으로 나누고, 병명/원인/치료
+            #     등은 따로 한 덩어리로 넣는다. 예전에는 이 부분이 잘려나가
+            #     아예 검색되지 않았다.
+            pieces = _chunk_text(symptom_text, token_limit)
+            pieces += _chunk_text(other_info_part, token_limit)
+
+            for order, piece in enumerate(pieces):
+                texts_for_embedding.append(piece)
+                metas.append(
+                    {
+                        "병명": disease_name,
+                        "파일": filename,
+                        "clean_text": clean_document_text,
+                        "chunk": order,
+                    }
+                )
 
         if not texts_for_embedding:
             raise RuntimeError("통합 인덱스를 만들 텍스트가 없습니다.")
 
+        log.info("질병 %d건 -> 조각 %d개", len(files), len(texts_for_embedding))
         db = faiss_from_texts(texts_for_embedding, embedding_model, metadatas=metas)
         db.save_local(UNIFIED_DB_PATH)
         return db
@@ -401,12 +507,42 @@ def build_or_load_unified_disease_db():
 def search_unified_db_with_scores(
     db, user_query: str, k: int
 ) -> List[Tuple[any, float]]:
+    """조각(청크) 단위 검색. 반환값은 (문서, 거리)."""
     # 'query: ' 프리픽스는 E5/BGE 계열 규약이다. 현재 모델
     # (jhgan/ko-sroberta-multitask)은 이 규약을 쓰지 않고 문서도
     # 프리픽스 없이 인덱싱했으므로, 붙이면 쿼리/문서 비대칭만 생긴다.
     if not db:
         return []
     return db.similarity_search_with_score(user_query, k)
+
+
+def search_diseases(db, user_query: str, k: int) -> List[Tuple[any, float]]:
+    """
+    질병 단위 상위 k개. 반환값은 (문서, 유사도) - 유사도는 1/(1+거리).
+
+    <p>질병 하나가 여러 조각으로 인덱싱되어 있으므로 잘 맞는 질병이 상위권을
+    여러 칸 차지한다. 조각을 넉넉히 가져와 병명으로 중복을 없애야 서로 다른
+    질병 k개가 채워진다. 중복을 그대로 두면 두 가지가 깨진다.
+      - 확신도 판단이 "1위와 3위의 격차" 를 보는데, 셋 다 같은 질병이면
+        격차가 늘 0에 가까워 항상 '확신 없음' 으로 떨어진다.
+      - LLM 에 넘길 후보에 같은 질병만 반복해서 들어간다.
+
+    <p>평가 스크립트(eval/eval_retrieval.py)도 이 함수를 쓴다. 검색 경로가
+    갈라지면 평가 점수가 실제 동작과 달라진다.
+    """
+    if not db:
+        return []
+    raw = search_unified_db_with_scores(db, user_query, k * CHUNK_OVERSAMPLE)
+    out, seen = [], set()
+    for doc, distance in raw:
+        name = get_disease_from_doc(doc)
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append((doc, 1 / (1 + distance)))
+        if len(out) >= k:
+            break
+    return out
 
 
 # ------------------------------------------------------------
@@ -627,20 +763,13 @@ def ask_symptoms():
     log.debug("  최종 검색 쿼리: '%s'", search_query)
     log.debug("  LLM 입력: '%s'", combined_input)
 
-    # 1) 검색 수행 (combined_input 사용)
-    docs_with_scores = search_unified_db_with_scores(
-        disease_db, search_query, k=K_DISEASE
-    )
+    # 1) 검색 수행 (질병 단위. 조각 중복 제거와 유사도 변환은 함수 안에서 한다)
+    scored_docs = search_diseases(disease_db, search_query, k=K_DISEASE)
 
     # 2) 검색 실패 시 일반 응답 라우팅
-    if not docs_with_scores:
+    if not scored_docs:
         log.info("관련 질병 정보를 찾을 수 없다. 일반 답변으로 넘긴다.")
         return _general_answer(combined_input)
-
-    # 3) 거리 -> 간이 유사도 변환
-    # 문서 1건 = 질병 1건 구조이므로 별도 중복 제거는 하지 않는다.
-    # (예전 변수명이 unique_docs 였으나 실제로는 dedup 을 하지 않아 오해를 유발했다.)
-    scored_docs = [(doc, 1 / (1 + score)) for doc, score in docs_with_scores]
 
     # 4) 상위 1개 유사도 점수로 라우팅 판단
     top1_score = scored_docs[0][1]
