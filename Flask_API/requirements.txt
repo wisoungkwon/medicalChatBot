@@ -13,6 +13,10 @@ Flask>=3.0,<4.0
 flask-cors>=4.0,<6.0
 python-dotenv>=1.0
 
+# 요청 제한. 이 API 에는 인증이 없어서, 없으면 반복 호출로 LLM 크레딧이 소진된다.
+# 기본 저장소가 메모리라 단일 프로세스에서만 정확하다(워커를 늘리면 워커별로 센다).
+flask-limiter>=3.5,<5.0
+
 # 운영용 WSGI 서버 (개발 서버 app.run 대신 사용)
 #   waitress-serve --host=0.0.0.0 --port=5050 Backend_Flask_API:app
 waitress>=3.0

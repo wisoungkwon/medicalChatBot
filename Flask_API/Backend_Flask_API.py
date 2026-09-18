@@ -50,6 +50,8 @@ log = logging.getLogger("medbot")
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # CORS 임포트
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # LangChain, OpenAI 등 라이브러리 임포트
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -445,8 +447,70 @@ else:
     log.info("CORS 허용 출처: %s", ALLOWED_ORIGINS)
     CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS}})
 
+# ------------------------------------------------------------
+# 8-1) 요청 제한(rate limit)
+# ------------------------------------------------------------
+# 이 API 에는 인증이 없다. CORS 는 브라우저만 막아 줄 뿐이라 curl 한 줄이면
+# 그대로 호출된다. 요청 하나가 임베딩 검색 + LLM 생성을 돌리므로, 제한이
+# 없으면 누구든 반복 호출로 LLM 크레딧을 태울 수 있다.
+#
+# 한 번에 두 창을 본다:
+#   RATE_LIMIT_ASK  - 짧은 구간의 연타 (기본 분당 10회)
+#   RATE_LIMIT_DAY  - 하루 총량 (기본 200회). 분당 제한만 두면 종일 천천히
+#                     두드려서 크레딧을 말릴 수 있다.
+RATE_LIMIT_ASK = os.getenv("RATE_LIMIT_ASK", "10 per minute").strip()
+RATE_LIMIT_DAY = os.getenv("RATE_LIMIT_DAY", "200 per day").strip()
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "1") == "1"
+
+# 프록시(ngrok, nginx, Spring 중계) 뒤에 있으면 remote_addr 이 전부 프록시
+# 주소로 찍힌다. 그러면 모든 사용자가 한 바구니를 공유해서, 한 명이 한도를
+# 채우면 나머지가 같이 막힌다.
+#
+# 그래서 "믿을 수 있는 프록시가 직접 연결한 경우에만" X-Forwarded-For 의
+# 첫 주소를 키로 쓴다. 아무한테나 이 헤더를 믿으면 헤더를 지어내서 제한을
+# 무한정 우회할 수 있으므로, 반드시 주소를 한정한다.
+#   TRUSTED_PROXIES="127.0.0.1,::1"   <- 기본값 (같은 PC 의 Spring 중계)
+_proxies_raw = os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1")
+TRUSTED_PROXIES = {p.strip() for p in _proxies_raw.split(",") if p.strip()}
+
+
+def _client_key() -> str:
+    """요청 제한을 셀 기준이 되는 호출자 식별값."""
+    peer = get_remote_address() or "unknown"
+    if peer in TRUSTED_PROXIES:
+        forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+    return peer
+
+
+limiter = Limiter(
+    key_func=_client_key,
+    app=app,
+    storage_uri="memory://",  # 단일 프로세스 전용. 여러 워커로 띄우면 워커마다 따로 센다.
+    enabled=RATE_LIMIT_ENABLED,
+)
+if RATE_LIMIT_ENABLED:
+    log.info("요청 제한: %s, %s (신뢰 프록시 %s)",
+             RATE_LIMIT_ASK, RATE_LIMIT_DAY, sorted(TRUSTED_PROXIES))
+else:
+    log.warning("요청 제한이 꺼져 있다(RATE_LIMIT_ENABLED=0). 외부에 노출하지 말 것.")
+
+
+@app.errorhandler(429)
+def rate_limit_exceeded(_e):
+    """
+    한도 초과 응답.
+
+    flask-limiter 기본 응답은 HTML 이라 호출부가 JSON 으로 읽지 못한다.
+    chatbot.js 는 error 키를 그대로 말풍선에 띄우고, Spring 중계도 JSON 을
+    기대하므로 다른 오류와 같은 형식으로 맞춘다.
+    """
+    return jsonify({"error": "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."}), 429
+
 
 @app.route("/health", methods=["GET"])
+@limiter.exempt  # 감시 스크립트가 주기적으로 두드리는 곳이라 제한에서 뺀다.
 def health():
     """기동/인덱스 상태 확인용. 로드밸런서·감시 스크립트가 쓴다."""
     ready = disease_db is not None
@@ -481,6 +545,8 @@ def _general_answer(user_text: str):
 
 
 @app.route("/ask_symptoms", methods=["POST"])
+@limiter.limit(RATE_LIMIT_ASK)
+@limiter.limit(RATE_LIMIT_DAY)
 def ask_symptoms():
     if disease_db is None:
         return jsonify({"error": "백엔드 시스템이 준비되지 않았습니다."}), 503

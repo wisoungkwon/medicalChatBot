@@ -4,6 +4,7 @@ import com.medbot.domain.DiagnosisHistory;
 import com.medbot.domain.Patient;
 import com.medbot.repository.DiagnosisHistoryRepository;
 import com.medbot.repository.PatientRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,6 +64,7 @@ public class ChatController {
 	private static final String MSG_AI_TIMEOUT = "답변을 만드는 데 시간이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.";
 	private static final String MSG_AI_UNREACHABLE = "AI 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.";
 	private static final String MSG_AI_FAILED = "AI 서버가 응답하지 못했습니다. 잠시 후 다시 시도해주세요.";
+	private static final String MSG_AI_RATE_LIMITED = "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
 
 	private final PatientRepository patientRepository;
 	private final DiagnosisHistoryRepository historyRepository;
@@ -86,7 +88,8 @@ public class ChatController {
 	}
 
 	@PostMapping
-	public ResponseEntity<?> chat(@RequestBody ChatRequest request, HttpSession session) {
+	public ResponseEntity<?> chat(@RequestBody ChatRequest request, HttpSession session,
+			HttpServletRequest httpRequest) {
 		String loginId = (String) session.getAttribute(PatientController.SESSION_LOGIN_ID);
 		if (loginId == null) {
 			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error(MSG_LOGIN_REQUIRED));
@@ -122,6 +125,14 @@ public class ChatController {
 		HttpHeaders headers = new HttpHeaders();
 		headers.setContentType(MediaType.APPLICATION_JSON);
 
+		// Flask 는 호출자별로 요청 수를 센다. 이 중계를 거치면 Flask 입장에서는
+		// 모든 요청이 "이 서버" 한 곳에서 오는 것으로 보여, 로그인 사용자 전체가
+		// 한 바구니를 공유하게 된다(한 명이 한도를 채우면 나머지도 막힌다).
+		// 원래 호출자 주소를 넘겨 사용자별로 세도록 한다.
+		// Flask 는 TRUSTED_PROXIES 에 등록된 주소에서 온 요청에 대해서만 이 헤더를
+		// 믿으므로, 외부에서 헤더를 지어내 우회할 수는 없다.
+		headers.set("X-Forwarded-For", httpRequest.getRemoteAddr());
+
 		// 3) Flask 호출
 		//    실패를 세 갈래로 나눈다. 사용자에게 줄 안내와 로그에 남길 내용이 서로 다르다.
 		String url = trimTrailingSlash(pythonApiUrl) + "/ask_symptoms";
@@ -139,6 +150,13 @@ public class ChatController {
 			// 경우가 있어 로그에만 남기고 화면으로는 내보내지 않는다.
 			log.error("Flask 오류 응답. url={} status={} body={}",
 					url, e.getStatusCode(), e.getResponseBodyAsString());
+
+			// 요청 제한만은 사유를 그대로 전달한다. 502 로 뭉뚱그리면 사용자는
+			// 서버가 고장난 줄 알고 계속 재시도해서 상황을 더 악화시킨다.
+			if (e.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+				return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+						.body(error(MSG_AI_RATE_LIMITED));
+			}
 			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(MSG_AI_FAILED));
 		} catch (ResourceAccessException e) {
 			// 연결 자체가 안 됐거나(서버 미기동) 읽기 타임아웃이다.
