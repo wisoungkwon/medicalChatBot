@@ -230,6 +230,32 @@ class ChatControllerTests {
 	}
 
 	/**
+	 * Flask 의 503(AI 모델 혼잡 / 인덱스 미준비)도 502 로 뭉뚱그리지 않는다.
+	 *
+	 * <p>제공자의 특정 모델이 통째로 막히는 일이 실제로 있었다. 그때 "AI 서버가
+	 * 응답하지 못했습니다" 로 내보내면 사용자는 고장으로 알고 곧장 다시 눌러
+	 * 같은 벽에 부딪힌다. 기다려야 한다는 것을 알려야 한다.
+	 */
+	@Test
+	@DisplayName("Flask 503(모델 혼잡)은 기다리라는 안내로 전달한다")
+	void serviceUnavailableIsPassedThrough() throws Exception {
+		flask.expect(requestTo(FLASK_URL))
+				.andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE)
+						.body("{\"error\":\"지금 AI 모델이 혼잡합니다. 30초쯤 뒤에 다시 시도해주세요.\"}")
+						.contentType(MediaType.APPLICATION_JSON));
+
+		MvcResult res = chat("두통");
+
+		assertThat(res.getResponse().getStatus()).isEqualTo(503);
+		String out = body(res);
+		assertThat(out).contains("혼잡");
+		assertThat(out).contains("다시 시도");
+		// 고장으로 오해하게 만드는 문구가 섞이면 안 된다.
+		assertThat(out).doesNotContain("응답하지 못했습니다");
+		flask.verify();
+	}
+
+	/**
 	 * Flask 는 호출자별로 요청 수를 센다. 이 중계를 거치면 Flask 에게는 모든
 	 * 요청이 한 곳(이 서버)에서 오는 것으로 보이므로, 원래 호출자 주소를
 	 * 넘겨야 로그인 사용자들이 한 바구니를 공유하지 않는다.

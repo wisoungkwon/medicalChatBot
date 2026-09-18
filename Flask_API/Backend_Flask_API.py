@@ -56,6 +56,7 @@ from flask_limiter.util import get_remote_address
 # LangChain, OpenAI 등 라이브러리 임포트
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+import openai
 from openai import OpenAI
 
 # .env 파일 로드 (선택)
@@ -205,16 +206,82 @@ if not LLM_API_KEY:
         "(예전 이름인 FRIENDLI_TOKEN 을 쓰고 있다면 LLM_API_KEY 로 바꾸세요.)"
     )
 
+# 장애가 난 모델을 건너뛸 대체 목록.
+#
+# 제공자의 특정 모델이 통째로 막히는 일이 실제로 있다. 2026-09-17 에는
+# gemini-3.8-flash 가 간헐적 503 이고 3.5-flash 가 멀쩡했는데, 2026-09-18 에는
+# 정반대로 3.5-flash 만 503 이었다(같은 키로 3.8-flash 는 정상). 어느 하나를
+# 고정해 두면 그날의 운에 서비스가 걸린다.
+#
+# 앞에서부터 시도하고, 서버측 장애(5xx)나 타임아웃이면 다음 모델로 넘어간다.
+# 잘못된 요청(4xx)이나 인증 오류는 모델을 바꿔도 같으므로 즉시 실패시킨다.
+_fallbacks_raw = os.getenv("LLM_FALLBACK_MODELS", "gemini-3.8-flash,gemini-flash-latest")
+LLM_FALLBACK_MODELS = [
+    m.strip() for m in _fallbacks_raw.split(",") if m.strip() and m.strip() != LLM_MODEL
+]
+
+# 시도 하나당 상한.
+#
+# 예전 기본값은 60초였고 SDK 기본 재시도가 2회라, 한 번 막히면 실패 하나를
+# 보는 데 최대 180초가 걸렸다(실측 134초). 그동안 Spring 중계는 120초에서
+# 먼저 끊기므로 그 뒤의 재시도는 아무도 기다리지 않는 낭비였다.
+#
+# 정상 생성이 15초 안팎이라 30초면 충분히 넉넉하다. 재시도는 SDK 에 맡기지
+# 않고(같은 모델을 다시 부르면 같은 장애를 만난다) 위 대체 모델로 넘긴다.
+# 최악의 경우도 (1 + 대체 수) * 30초 라 Spring 한도 안에 들어온다.
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "30"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "0"))
+
 llm_client = OpenAI(
     api_key=LLM_API_KEY,
     base_url=LLM_BASE_URL,
-    timeout=float(os.getenv("LLM_TIMEOUT", "60")),
+    timeout=LLM_TIMEOUT,
+    max_retries=LLM_MAX_RETRIES,
 )
 
 
+# 모델이 일시적으로 막혔을 때의 안내. "실패했습니다" 로 뭉뚱그리면 사용자는
+# 고장으로 알고 곧장 다시 눌러 같은 벽에 부딪힌다. 기다려야 한다는 걸 알려준다.
+MSG_LLM_BUSY = "지금 AI 모델이 혼잡합니다. 30초쯤 뒤에 다시 시도해주세요."
+
+
+class LLMUnavailable(RuntimeError):
+    """모든 모델이 서버측 장애/타임아웃으로 응답하지 못했다.
+
+    호출부는 이걸 '일시적이니 잠시 후 다시' 로 안내해야 한다.
+    설정 오류나 잘못된 요청과 구분하려고 따로 둔다.
+    """
+
+
 def chat_with_llm(messages, **gen_opts) -> str:
+    models = [LLM_MODEL] + LLM_FALLBACK_MODELS
+    last_error = None
+
+    for index, model in enumerate(models):
+        try:
+            return _complete_once(model, messages, **gen_opts)
+        except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as e:
+            # 모델을 바꿔도 결과가 같은 오류는 넘길 이유가 없다.
+            status = getattr(e, "status_code", None)
+            if status is not None and 400 <= status < 500 and status != 429:
+                raise
+            last_error = e
+            remaining = len(models) - index - 1
+            log.warning(
+                "모델 %s 응답 실패 (%s). %s",
+                model,
+                type(e).__name__,
+                f"대체 모델 {remaining}개 남음" if remaining else "대체 모델이 더 없다",
+            )
+
+    raise LLMUnavailable(
+        f"모델 {len(models)}개가 모두 응답하지 못했다: {models}"
+    ) from last_error
+
+
+def _complete_once(model: str, messages, **gen_opts) -> str:
     kwargs = {
-        "model": LLM_MODEL,
+        "model": model,
         "messages": messages,
         "temperature": gen_opts.get(
             "temperature", 0.3
@@ -690,6 +757,10 @@ def _general_answer(user_text: str):
     ]
     try:
         return jsonify({"answer": chat_with_llm(general_messages)})
+    except LLMUnavailable:
+        # 모델 쪽 일시 장애. 트레이스백은 필요 없다(원인이 이미 분명하다).
+        log.warning("일반 답변 실패: 모든 모델이 응답하지 못했다.")
+        return jsonify({"error": MSG_LLM_BUSY}), 503
     except Exception:
         log.exception("일반 답변 생성 실패")
         return jsonify({"error": "AI 응답 생성에 실패했습니다."}), 502
@@ -833,6 +904,9 @@ def ask_symptoms():
         ]
         try:
             answer = chat_with_llm(messages)
+        except LLMUnavailable:
+            log.warning("최종 답변 실패: 모든 모델이 응답하지 못했다.")
+            return jsonify({"error": MSG_LLM_BUSY}), 503
         except Exception:
             log.exception("최종 답변 생성 실패")
             return jsonify({"error": "AI 응답 생성에 실패했습니다."}), 502

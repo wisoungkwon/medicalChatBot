@@ -65,6 +65,8 @@ public class ChatController {
 	private static final String MSG_AI_UNREACHABLE = "AI 서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.";
 	private static final String MSG_AI_FAILED = "AI 서버가 응답하지 못했습니다. 잠시 후 다시 시도해주세요.";
 	private static final String MSG_AI_RATE_LIMITED = "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+	/** Flask 의 MSG_LLM_BUSY 와 같은 뜻. 한쪽을 고치면 다른 쪽도 맞출 것. */
+	private static final String MSG_AI_BUSY = "지금 AI 모델이 혼잡합니다. 30초쯤 뒤에 다시 시도해주세요.";
 
 	private final PatientRepository patientRepository;
 	private final DiagnosisHistoryRepository historyRepository;
@@ -151,11 +153,23 @@ public class ChatController {
 			log.error("Flask 오류 응답. url={} status={} body={}",
 					url, e.getStatusCode(), e.getResponseBodyAsString());
 
-			// 요청 제한만은 사유를 그대로 전달한다. 502 로 뭉뚱그리면 사용자는
-			// 서버가 고장난 줄 알고 계속 재시도해서 상황을 더 악화시킨다.
-			if (e.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()) {
+			// "기다리면 되는" 실패는 사유를 그대로 전달한다. 502 로 뭉뚱그리면
+			// 사용자는 서버가 고장난 줄 알고 계속 재시도해 상황을 더 악화시킨다.
+			int status = e.getStatusCode().value();
+			if (status == HttpStatus.TOO_MANY_REQUESTS.value()) {
 				return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
 						.body(error(MSG_AI_RATE_LIMITED));
+			}
+			// 503 = Flask 가 "AI 모델이 혼잡하다" 또는 "인덱스가 준비되지 않았다" 고
+			// 알려 온 경우. 둘 다 잠시 후 다시 하면 되는 상황이다.
+			//
+			// Flask 본문에도 사용자용 문구가 들어 있지만 그대로 전달하지 않는다.
+			// "Flask 응답 본문은 화면으로 내보내지 않는다" 는 규칙을 예외 없이
+			// 유지하는 편이 안전하다(5xx 본문에 트레이스백이 실려 올 수 있다).
+			// 대신 같은 뜻의 문구를 여기에 둔다.
+			if (status == HttpStatus.SERVICE_UNAVAILABLE.value()) {
+				return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+						.body(error(MSG_AI_BUSY));
 			}
 			return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error(MSG_AI_FAILED));
 		} catch (ResourceAccessException e) {
