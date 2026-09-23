@@ -11,6 +11,7 @@ medical_server.py
 import os, json, re
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import List, Tuple
 
@@ -215,7 +216,15 @@ if not LLM_API_KEY:
 #
 # 앞에서부터 시도하고, 서버측 장애(5xx)나 타임아웃이면 다음 모델로 넘어간다.
 # 잘못된 요청(4xx)이나 인증 오류는 모델을 바꿔도 같으므로 즉시 실패시킨다.
-_fallbacks_raw = os.getenv("LLM_FALLBACK_MODELS", "gemini-3.8-flash,gemini-flash-latest")
+#
+# **세대를 섞어서 적는다.** 2026-09-23 에 flash 계열이 한꺼번에 503 을 낸 적이
+# 있다(3.5/3.8/flash-latest 가 15초 안에 전부 실패). 같은 등급만 나열하면
+# 제공자 쪽 혼잡 구간에서 함께 막힌다. lite 계열은 용량 풀이 달라 마지막
+# 보루로 쓸 만하다(응답 품질은 조금 떨어져도 답이 아예 없는 것보다 낫다).
+_fallbacks_raw = os.getenv(
+    "LLM_FALLBACK_MODELS",
+    "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.1-flash-lite",
+)
 LLM_FALLBACK_MODELS = [
     m.strip() for m in _fallbacks_raw.split(",") if m.strip() and m.strip() != LLM_MODEL
 ]
@@ -231,6 +240,20 @@ LLM_FALLBACK_MODELS = [
 # 최악의 경우도 (1 + 대체 수) * 30초 라 Spring 한도 안에 들어온다.
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "30"))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "0"))
+
+# 목록을 한 바퀴 다 돌아도 실패하면, 잠깐 쉬었다 다시 돈다.
+#
+# 혼잡 구간은 짧다. 2026-09-23 실측: 16:43 성공 -> 16:45 전 모델 503 ->
+# 몇 분 뒤 전 모델 정상. 그리고 503 은 2~8초 만에 돌아오므로(타임아웃 30초를
+# 다 쓰지 않는다) 한 바퀴가 15초밖에 안 걸린다. 그 15초를 쓰고 바로 포기하면
+# 조금만 기다리면 됐을 요청을 버리는 셈이다.
+#
+# 횟수가 아니라 **총 시간**으로 묶는다. 실패가 빠르면 여러 바퀴를 돌고,
+# 느리면(타임아웃) 적게 돈다. 어느 쪽이든 상한이 예측 가능하다.
+# 다음 시도를 시작하기 전에 예산을 확인하므로 최악은 예산 + 시도 1회
+# (75 + 30 = 105초)이고, Spring 중계의 읽기 상한 120초 안에 들어온다.
+LLM_TOTAL_BUDGET = float(os.getenv("LLM_TOTAL_BUDGET", "75"))
+LLM_SWEEP_PAUSE = float(os.getenv("LLM_SWEEP_PAUSE", "4"))
 
 llm_client = OpenAI(
     api_key=LLM_API_KEY,
@@ -255,27 +278,68 @@ class LLMUnavailable(RuntimeError):
 
 def chat_with_llm(messages, **gen_opts) -> str:
     models = [LLM_MODEL] + LLM_FALLBACK_MODELS
+    deadline = time.monotonic() + LLM_TOTAL_BUDGET
     last_error = None
+    sweep = 0
 
-    for index, model in enumerate(models):
-        try:
-            return _complete_once(model, messages, **gen_opts)
-        except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as e:
-            # 모델을 바꿔도 결과가 같은 오류는 넘길 이유가 없다.
-            status = getattr(e, "status_code", None)
-            if status is not None and 400 <= status < 500 and status != 429:
-                raise
-            last_error = e
-            remaining = len(models) - index - 1
-            log.warning(
-                "모델 %s 응답 실패 (%s). %s",
-                model,
-                type(e).__name__,
-                f"대체 모델 {remaining}개 남음" if remaining else "대체 모델이 더 없다",
-            )
+    while True:
+        sweep += 1
+        for index, model in enumerate(models):
+            if time.monotonic() >= deadline:
+                break
+            try:
+                return _complete_once(model, messages, **gen_opts)
+            except openai.BadRequestError as e:
+                # 이 모델이 우리가 보낸 파라미터를 받지 않는다.
+                # reasoning_effort 가 대표적이다 - lite 계열은 이 값을 거부한다.
+                # 파라미터를 빼고 한 번만 더 해 보고, 그래도 안 되면 다음 모델로.
+                if gen_opts.get("_no_reasoning"):
+                    last_error = e
+                    log.warning("모델 %s 가 요청을 거부했다 (400). 다음 모델로 넘어간다.", model)
+                    continue
+                try:
+                    return _complete_once(model, messages, _no_reasoning=True, **gen_opts)
+                except Exception as retry_error:  # noqa: BLE001 - 아래 공통 처리로 넘긴다
+                    last_error = retry_error
+                    log.warning(
+                        "모델 %s 실패 (%s). 다음 모델로 넘어간다.",
+                        model,
+                        type(retry_error).__name__,
+                    )
+                    continue
+            except (openai.APIStatusError, openai.APITimeoutError, openai.APIConnectionError) as e:
+                # 모델을 바꿔도 결과가 같은 오류는 넘길 이유가 없다.
+                status = getattr(e, "status_code", None)
+                if status is not None and 400 <= status < 500 and status != 429:
+                    raise
+                last_error = e
+                remaining = len(models) - index - 1
+                log.warning(
+                    "모델 %s 응답 실패 (%s). %s",
+                    model,
+                    type(e).__name__,
+                    f"대체 모델 {remaining}개 남음" if remaining else "대체 모델이 더 없다",
+                )
+
+        # 한 바퀴를 다 돌았다. 예산이 남아 있으면 잠깐 쉬었다 다시 돈다.
+        # 제공자 쪽 혼잡은 대개 짧게 지나가므로, 남은 시간을 쓰는 편이 낫다.
+        #
+        # 대기 시간은 바퀴마다 두 배로 늘린다(4 -> 8 -> 16초). 503 이 즉시
+        # 돌아오는 상황에서 고정 간격으로 돌면 예산 안에 수십 번을 두드리게
+        # 되는데, 이미 혼잡한 API 를 더 밀어붙일 뿐이다.
+        pause = LLM_SWEEP_PAUSE * (2 ** (sweep - 1))
+        remaining_budget = deadline - time.monotonic()
+        if remaining_budget <= pause:
+            break
+        log.warning(
+            "%d번째 시도에서 모델 %d개가 모두 실패했다. %.0f초 쉬고 다시 시도한다 "
+            "(남은 예산 %.0f초).",
+            sweep, len(models), pause, remaining_budget,
+        )
+        time.sleep(pause)
 
     raise LLMUnavailable(
-        f"모델 {len(models)}개가 모두 응답하지 못했다: {models}"
+        f"모델 {len(models)}개를 {sweep}바퀴 시도했으나 모두 응답하지 못했다: {models}"
     ) from last_error
 
 
@@ -288,7 +352,14 @@ def _complete_once(model: str, messages, **gen_opts) -> str:
         ),  # 숫자를 늘리면 늘릴수록 창의적인 답변이 나옴.
         "max_tokens": gen_opts.get("max_tokens", LLM_MAX_TOKENS),
     }
-    if LLM_REASONING_EFFORT and LLM_REASONING_EFFORT.lower() != "auto":
+    # _no_reasoning: 이 파라미터를 거부하는 모델용(lite 계열이 400 을 낸다).
+    # 추론을 끄려고 보내는 값이므로, 애초에 추론을 하지 않는 모델에서는
+    # 빼고 보내도 결과가 달라지지 않는다.
+    if (
+        not gen_opts.get("_no_reasoning")
+        and LLM_REASONING_EFFORT
+        and LLM_REASONING_EFFORT.lower() != "auto"
+    ):
         kwargs["reasoning_effort"] = LLM_REASONING_EFFORT
 
     completion = llm_client.chat.completions.create(**kwargs)
